@@ -12,7 +12,7 @@ const state = {
   activeImage: null,
   rows: [],         // grid rows from the server (or blank manual rows)
   audit: null,
-  settings: { has_key: false, gemini_model: "gemini-2.0-flash", mode: "gemini" },
+  settings: { has_key: false, gemini_model: "gemini-2.0-flash", local_engine: "trocr_base", mode: "gemini" },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -72,11 +72,12 @@ function setMode(mode) {
   el("mode-manual").classList.toggle("is-active", !gemini);
   el("mode-gemini").setAttribute("aria-selected", String(gemini));
   el("mode-manual").setAttribute("aria-selected", String(!gemini));
-  el("recognize-btn").style.display = gemini ? "" : "none";
-  el("empty-title").textContent = gemini ? "No rows yet" : "Manual entry";
+  // Both modes recognise from uploaded pages; only the engine differs.
+  el("recognize-label").textContent = gemini ? "Recognise with Gemini" : "Run local OCR";
+  el("empty-title").textContent = "No rows yet";
   el("empty-sub").textContent = gemini
-    ? "Upload page photos, then run recognition. Review and correct, then export."
-    : "Add rows and type the survey / meter / remarks yourself. Validate applies the correction rules; then export.";
+    ? "Upload page photos, then Recognise with Gemini. Review and correct, then export."
+    : "Upload page photos, then Run local OCR (offline). Review and correct, then export.";
   updateRecognizeAvailability();
   settingsStoreMode(mode);
 }
@@ -84,15 +85,17 @@ function settingsStoreMode(mode) {
   apiJSON("/api/settings", { mode }).catch(() => {});
 }
 el("mode-gemini").addEventListener("click", () => setMode("gemini"));
-el("mode-manual").addEventListener("click", () => setMode("manual"));
+el("mode-manual").addEventListener("click", () => setMode("local"));
 
 function updateRecognizeAvailability() {
   const btn = el("recognize-btn");
-  const ready = state.mode === "gemini" && state.job && state.images.length > 0;
+  const hasImages = state.job && state.images.length > 0;
+  const gemini = state.mode === "gemini";
+  const ready = hasImages && (!gemini || state.settings.has_key);
   btn.disabled = !ready;
-  btn.title = !state.settings.has_key
-    ? "Add a Gemini API key in Settings first"
-    : (!state.job ? "Upload page photos first" : "");
+  btn.title = !hasImages
+    ? "Upload page photos first"
+    : (gemini && !state.settings.has_key ? "Add a Gemini API key in Settings first" : "");
 }
 
 /* --------------------------------------------------------------- upload */
@@ -166,23 +169,39 @@ el("preview-close").addEventListener("click", () => {
 });
 
 /* ------------------------------------------------------------- recognise */
-el("recognize-btn").addEventListener("click", async () => {
+el("recognize-btn").addEventListener("click", () => {
   if (!state.job) return toast("warn", "Upload first", "Add page photos before recognising.");
+  return state.mode === "gemini" ? runGemini() : runLocal();
+});
+
+async function runGemini() {
   if (!state.settings.has_key) { openSettings(); return toast("warn", "No API key", "Add a Gemini key in Settings."); }
   showOverlay(`Recognising ${state.images.length} page${state.images.length > 1 ? "s" : ""} with Gemini…`);
   try {
     const data = await apiJSON("/api/recognize", { job: state.job });
     applyResult(data);
-    (data.recognition_errors || []).forEach((e) =>
-      toast("error", `Page ${e.page} failed`, e.error));
-    const ok = data.summary.row_count;
-    toast("success", "Recognised", `${ok} rows read · ${data.summary.needs_review} need review.`);
+    (data.recognition_errors || []).forEach((e) => toast("error", `Page ${e.page} failed`, e.error));
+    toast("success", "Recognised", `${data.summary.row_count} rows read · ${data.summary.needs_review} need review.`);
   } catch (err) {
     toast("error", "Recognition failed", err.message);
   } finally {
     hideOverlay();
   }
-});
+}
+
+async function runLocal() {
+  showOverlay(`Reading ${state.images.length} page${state.images.length > 1 ? "s" : ""} with the local OCR engine… this can take a while.`);
+  try {
+    const data = await apiJSON("/api/recognize_local", { job: state.job });
+    applyResult(data);
+    (data.recognition_errors || []).forEach((e) => toast("error", `Page ${e.page} skipped`, e.error));
+    toast("success", "Local OCR done", `${data.summary.row_count} rows · ${data.summary.needs_review} need review.`);
+  } catch (err) {
+    toast("error", "Local OCR failed", err.message);
+  } finally {
+    hideOverlay();
+  }
+}
 
 /* -------------------------------------------------------------- validate */
 el("validate-btn").addEventListener("click", async () => {
@@ -289,6 +308,7 @@ function prettyRules(rules) {
     survey_struck_out: "struck out", struck_out_correction: "struck out",
     ambiguous_correction: "ambiguous", non_latin_dropped: "Urdu dropped",
     remarks_joined: "joined remarks", section_marker: "section",
+    low_confidence: "low confidence",
   };
   return rules.map((r) => map[r] || r.replace(/_/g, " ")).slice(0, 2).join(" · ");
 }
@@ -379,6 +399,7 @@ function renderAudit(audit, summary) {
 const modal = el("settings-modal");
 function openSettings() {
   el("model-select").value = state.settings.gemini_model || "gemini-2.0-flash";
+  el("engine-select").value = state.settings.local_engine || "trocr_base";
   el("api-key").value = "";
   el("api-key").placeholder = state.settings.has_key ? "•••••••••• (saved — leave blank to keep)" : "Paste your API key";
   el("key-status").textContent = "";
@@ -416,11 +437,12 @@ el("settings-save").addEventListener("click", async () => {
     const data = await apiJSON("/api/settings", {
       gemini_api_key: el("api-key").value.trim(),
       gemini_model: el("model-select").value,
+      local_engine: el("engine-select").value,
     });
     state.settings = data;
     updateRecognizeAvailability();
     closeSettings();
-    toast("success", "Settings saved", data.has_key ? "Gemini key stored." : "Model updated.");
+    toast("success", "Settings saved", data.has_key ? "Gemini key stored." : "Settings updated.");
   } catch (err) {
     toast("error", "Could not save", err.message);
   }
@@ -435,8 +457,8 @@ async function init() {
   } catch { /* server default is fine */ }
   setMode(state.settings.mode || "gemini");
   renderGrid();
-  if (!state.settings.has_key) {
-    toast("warn", "Add a Gemini key", "Open Settings to enable AI recognition — or switch to Manual mode.");
+  if (!state.settings.has_key && (state.settings.mode || "gemini") === "gemini") {
+    toast("warn", "Add a Gemini key", "Open Settings to enable AI recognition — or switch to Local OCR (offline).");
   }
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSettings(); } });

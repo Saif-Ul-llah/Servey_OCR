@@ -16,12 +16,15 @@ uvicorn>=0.29
 python-multipart>=0.0.9   # file uploads
 requests>=2.31            # Gemini REST calls
 
-# --- optional local OCR engines (deterministic core does not need them) ---
-# torch                    # CPU wheel: pip install torch --index-url https://download.pytorch.org/whl/cpu
-# transformers>=4.40       # TrOCR handwritten
-# paddleocr>=2.7           # PaddleOCR
-# paddlepaddle>=2.6        # PaddleOCR backend (CPU)
-# easyocr>=1.7             # EasyOCR
+# --- Local OCR (offline) mode: install an engine to enable it ---
+# TrOCR-base (recommended — the real handwriting model). CPU wheels:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#   pip install transformers
+# Note: trocr_small ships a SentencePiece tokenizer that transformers 5.x cannot
+# load on Python 3.14; use trocr_base (BPE tokenizer, loads fine).
+# Lighter, scene-text alternatives (weaker on handwriting):
+# easyocr>=1.7
+# paddleocr>=2.7  paddlepaddle>=2.6
 
 # --- dev ---
 pytest>=8.0

@@ -44,18 +44,46 @@ _NUMERIC_RE = re.compile(r"^-?\d+$")
 #: exporter re-adds. A recognizer that writes "KE-683" back into the cell must
 #: not have its letters fed to digit-coercion (which would read "KE" as "3").
 _SURVEY_PREFIX_RE = re.compile(r"^\s*KE[-\s]*", re.IGNORECASE)
+#: Below this recogniser confidence, a cell that otherwise passed is still sent
+#: to review. Deliberately low: the grammar/whitelist rules already flag
+#: structural garbage, so this only catches quietly-uncertain readings.
+_LOW_CONFIDENCE = 0.5
 
 
-def _make_row(page: str, index: int, survey: str, meter: str, remarks: str) -> RowRecord:
+def _make_row(
+    page: str,
+    index: int,
+    survey: str,
+    meter: str,
+    remarks: str,
+    confidence: dict[str, float] | None = None,
+) -> RowRecord:
     """Build a fresh RowRecord whose cells carry the input as raw text."""
     survey = _SURVEY_PREFIX_RE.sub("", survey)
-    return RowRecord(
+    row = RowRecord(
         page=page,
         index=index,
         survey=Cell(column=Column.SURVEY, raw_text=survey, text=survey),
         meter=Cell(column=Column.METER, raw_text=meter, text=meter),
         remarks=Cell(column=Column.REMARKS, raw_text=remarks, text=remarks),
     )
+    if confidence:
+        row.survey.confidence = float(confidence.get("survey", 0.0) or 0.0)
+        row.meter.confidence = float(confidence.get("meter", 0.0) or 0.0)
+        row.remarks.confidence = float(confidence.get("remarks", 0.0) or 0.0)
+    return row
+
+
+def _flag_low_confidence(record: RowRecord) -> None:
+    """Send a quietly-uncertain cell to review even if it parsed cleanly."""
+    for cell in (record.survey, record.meter, record.remarks):
+        if (
+            0.0 < cell.confidence < _LOW_CONFIDENCE
+            and not cell.is_empty
+            and cell.status in (Status.OK, Status.CORRECTED)
+        ):
+            cell.status = Status.LOW_CONFIDENCE
+            cell.note("low_confidence")
 
 
 def _cell_view(cell: Cell) -> dict:
@@ -81,17 +109,28 @@ def process(pages: list[tuple[str, list[dict]]], config: AssemblyConfig | None =
 
     page_results: list[PageResult] = []
     for page_name, raw_rows in pages:
-        records = [
-            _make_row(
-                page_name,
-                index,
-                str(raw.get("survey", "") or ""),
-                str(raw.get("meter", "") or ""),
-                str(raw.get("remarks", "") or ""),
+        records = []
+        for index, raw in enumerate(raw_rows):
+            confidence = None
+            if any(k in raw for k in ("survey_conf", "meter_conf", "remarks_conf")):
+                confidence = {
+                    "survey": raw.get("survey_conf"),
+                    "meter": raw.get("meter_conf"),
+                    "remarks": raw.get("remarks_conf"),
+                }
+            records.append(
+                _make_row(
+                    page_name,
+                    index,
+                    str(raw.get("survey", "") or ""),
+                    str(raw.get("meter", "") or ""),
+                    str(raw.get("remarks", "") or ""),
+                    confidence=confidence,
+                )
             )
-            for index, raw in enumerate(raw_rows)
-        ]
         corrector.correct_page(records)
+        for record in records:
+            _flag_low_confidence(record)
         page_results.append(PageResult(path=page_name, rows=records))
 
     # Replicate assemble()'s steps so the rich per-line records and the

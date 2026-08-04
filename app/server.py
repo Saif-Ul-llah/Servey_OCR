@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import pipeline, recognizer, settings_store
+from app import local_engine, pipeline, recognizer, settings_store
 from local_ocr import paths
 
 STATIC_DIR = paths.STATIC_DIR
@@ -40,6 +40,7 @@ _JOBS: dict[str, dict[str, Path]] = {}
 class SettingsIn(BaseModel):
     gemini_api_key: str | None = None
     gemini_model: str | None = None
+    local_engine: str | None = None
     mode: str | None = None
 
 
@@ -105,6 +106,7 @@ def post_settings(body: SettingsIn) -> dict:
     updated = settings_store.update(
         gemini_api_key=body.gemini_api_key,
         gemini_model=body.gemini_model,
+        local_engine=body.local_engine,
         mode=body.mode,
     )
     return updated.public()
@@ -190,6 +192,50 @@ def recognize(body: RecognizeIn) -> JSONResponse:
 
     if not pages and errors:
         # Every page failed -- surface the first reason rather than an empty grid.
+        raise HTTPException(status_code=502, detail=errors[0]["error"])
+
+    payload = pipeline.process(pages)
+    payload["recognition_errors"] = errors
+    return JSONResponse(payload)
+
+
+@app.post("/api/recognize_local")
+def recognize_local(body: RecognizeIn) -> JSONResponse:
+    registry = _JOBS.get(body.job)
+    if not registry:
+        raise HTTPException(status_code=404, detail="Upload session not found. Re-upload the images.")
+
+    settings = settings_store.load()
+    try:
+        engine = local_engine.get_engine(settings.local_engine)
+    except KeyError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown OCR engine '{settings.local_engine}'. Known: {', '.join(local_engine.known_engines())}.",
+        )
+    if not engine.available:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The '{settings.local_engine}' engine is not installed "
+                f"({engine.unavailable_reason}). Install it in this Python environment, then retry."
+            ),
+        )
+
+    names = body.images or list(registry.keys())
+    pages: list[tuple[str, list[dict]]] = []
+    errors: list[dict] = []
+    for name in names:
+        path = registry.get(name)
+        if path is None:
+            continue
+        result = local_engine.recognise_page_local(path, engine)
+        if result.error:
+            errors.append({"page": result.page, "error": result.error})
+            continue
+        pages.append((result.page, result.rows))
+
+    if not pages and errors:
         raise HTTPException(status_code=502, detail=errors[0]["error"])
 
     payload = pipeline.process(pages)

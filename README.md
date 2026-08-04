@@ -38,12 +38,14 @@ and the app opens in your browser. Rebuild after code changes with
 
 ## How it works
 
-Two recognition modes, chosen with the toggle in the top bar:
+Two recognition modes, chosen with the toggle in the top bar. **Both follow the
+same flow** — `upload images → recognise → correction → review/edit → export` —
+and differ only in *which* recognizer reads the pages:
 
-| Mode | What it does | Needs |
+| Mode | What reads the pages | Needs |
 |---|---|---|
 | **Gemini AI** | Google Gemini reads each page (layout + handwriting together) into raw rows. | API key + internet |
-| **Manual** | You type the rows yourself; *Validate & correct* runs the same rules. | nothing — fully offline |
+| **Local OCR** | The local segmenter crops each cell and a local engine (TrOCR by default) reads it — no cloud. | engine installed (see below); fully offline |
 
 Either way, every value then flows through one deterministic core:
 
@@ -61,11 +63,37 @@ reference file (same sheet, headers, column widths, and — critically — the s
 cell *types*: an empty continuation-survey cell is genuinely empty, a lone side
 code is a number).
 
-**Why cloud, not a local model?** A local 3B vision model reserves ~10 GB at
-runtime; this 8 GB machine can't hold it. Gemini decouples recognition accuracy
-from the laptop's RAM. The local OCR engine adapters (TrOCR/Paddle/EasyOCR) and
-the bootstrap segmenter remain in the tree for a fully-offline recognizer later,
-but are optional and not required.
+### Local OCR (offline) mode
+
+Runs with no cloud: `local_ocr/layout` segments the page, `local_ocr/ocr` reads
+each cell, then the same correction/assembly/audit runs. Install an engine into
+the Python environment first (TrOCR is the only true handwriting model):
+
+```bash
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+python -m pip install transformers        # TrOCR-base (default)
+# or, lighter but scene-text (weaker on handwriting):
+python -m pip install easyocr             # or: paddleocr paddlepaddle
+```
+
+Pick the engine in **Settings → Local OCR engine** (default **TrOCR-base**).
+Three caveats:
+
+- **Use TrOCR-base, not -small.** The `-small` checkpoint ships a SentencePiece
+  tokenizer that transformers 5.x cannot load on Python 3.14; `-base` uses a BPE
+  tokenizer that loads fine (the engine builds it directly, bypassing the broken
+  converter).
+
+- **Accuracy is capped by the segmenter**, which is a bootstrap and is rough on
+  the WhatsApp-compressed samples (better on full-res originals). The review
+  grid is where you catch its mistakes; low-confidence cells are flagged.
+- **Not available in the standalone `.exe`** — bundling PyTorch would balloon it
+  to gigabytes. Use `python run_app.py` for local mode; the exe is Gemini-only.
+
+**Why Gemini is the default:** a local 3B *vision* model reserves ~10 GB at
+runtime and this 8 GB machine can't hold it. Gemini reads the page in one call
+and needs no local segmentation. Local OCR engines (TrOCR/EasyOCR/Paddle) are
+far lighter and do run here, just slower and gated by segmentation quality.
 
 ---
 

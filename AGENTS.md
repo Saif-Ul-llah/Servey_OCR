@@ -34,12 +34,17 @@ Two layers, kept strictly separate:
    - `export/xlsx_exporter.py` — `write_workbook()`; reproduces exact cell types.
 
 2. **`app/` — the desktop app.** A thin FastAPI layer that *drives* the core.
-   - `recognizer.py` — Google Gemini vision via REST → raw rows.
-   - `pipeline.py` — `process()` (correct + assemble → review grid + audit) and
-     `export()` (grid → workbook, verbatim). The **only** place the app reaches
-     into `local_ocr`.
-   - `server.py` — JSON API + serves `static/` (vanilla-JS SPA).
-   - `settings_store.py` — persists the Gemini key/model/mode.
+   Two recognition modes, same downstream flow
+   (`upload → recognise → correct → review → export`):
+   - `recognizer.py` — **Gemini** (cloud) vision via REST → raw rows.
+   - `local_engine.py` — **Local OCR** (offline): `local_ocr.layout` segments the
+     page, `local_ocr.ocr` engine (TrOCR default) reads each cell → raw rows.
+   - `pipeline.py` — `process()` (correct + assemble → review grid + audit; also
+     flags low-confidence cells) and `export()` (grid → workbook, verbatim). The
+     **only** place the app reaches into `local_ocr`.
+   - `server.py` — JSON API (`/api/recognize`, `/api/recognize_local`,
+     `/api/validate`, `/api/export`) + serves `static/` (vanilla-JS SPA).
+   - `settings_store.py` — persists the Gemini key/model, local engine, and mode.
 
 **Rule: the app never re-implements core logic.** New correction or assembly
 behaviour goes in `local_ocr/` with tests, not in `app/`.

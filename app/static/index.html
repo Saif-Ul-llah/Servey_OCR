@@ -27,7 +27,7 @@
           <span class="dot"></span> Gemini AI
         </button>
         <button id="mode-manual" class="mode-btn" role="tab" aria-selected="false">
-          Manual
+          Local OCR
         </button>
       </div>
       <button id="theme-btn" class="icon-btn" title="Toggle theme" aria-label="Toggle theme">
@@ -66,7 +66,7 @@
         <div class="toolbar-left">
           <button id="recognize-btn" class="btn btn-primary">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 9-14 9V3z"/></svg>
-            Recognise with Gemini
+            <span id="recognize-label">Recognise with Gemini</span>
           </button>
           <button id="validate-btn" class="btn btn-secondary">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -150,13 +150,26 @@
         </div>
 
         <div class="field">
-          <label for="model-select">Model</label>
+          <label for="model-select">Gemini model <span class="field-tag">AI mode</span></label>
           <select id="model-select">
             <option value="gemini-2.0-flash">gemini-2.0-flash &mdash; fast, cheap (recommended)</option>
             <option value="gemini-2.5-flash">gemini-2.5-flash &mdash; newer, stronger</option>
             <option value="gemini-1.5-flash">gemini-1.5-flash</option>
             <option value="gemini-1.5-pro">gemini-1.5-pro &mdash; most accurate, slower</option>
           </select>
+        </div>
+
+        <div class="field">
+          <label for="engine-select">Local OCR engine <span class="field-tag">offline mode</span></label>
+          <select id="engine-select">
+            <option value="trocr_base">TrOCR-base &mdash; handwriting, best accuracy (recommended)</option>
+            <option value="trocr_small">TrOCR-small &mdash; lighter, but not supported on this Python 3.14 build</option>
+            <option value="easyocr">EasyOCR &mdash; fast, scene-text</option>
+            <option value="paddleocr">PaddleOCR &mdash; fast, scene-text</option>
+          </select>
+          <p class="hint">Runs fully offline. Requires the engine installed in this Python
+          environment (TrOCR needs <code>torch</code> + <code>transformers</code>). Not available in the
+          standalone .exe.</p>
         </div>
       </div>
       <div class="modal-foot">

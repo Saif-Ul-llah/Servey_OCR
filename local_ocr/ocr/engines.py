@@ -95,6 +95,44 @@ class PaddleOCREngine(Engine):
         return Recognition(text=postprocess(text, field), confidence=confidence, engine=self.name)
 
 
+def _load_trocr_processor(checkpoint: str):
+    """Load a TrOCR processor, working around transformers 5.x tokenizer breakage.
+
+    transformers 5.x cannot convert several older TrOCR tokenizers to the fast
+    format (the slow->fast converters were dropped and the checkpoints ship no
+    ``tokenizer.json``). For byte-level-BPE checkpoints -- ``*-base-*``, which
+    carry ``vocab.json`` + ``merges.txt`` -- we build the fast tokenizer directly
+    and skip the broken path. Checkpoints that ship only a SentencePiece model
+    (``*-small-*``) cannot be loaded on this stack and raise, so the caller marks
+    them unavailable rather than crashing.
+    """
+    from transformers import TrOCRProcessor
+
+    try:
+        return TrOCRProcessor.from_pretrained(checkpoint)
+    except ValueError:
+        pass  # fast-tokenizer conversion failed; fall back to a manual build
+
+    import tempfile
+
+    from huggingface_hub import hf_hub_download
+    from tokenizers import ByteLevelBPETokenizer
+    from transformers import AutoImageProcessor, PreTrainedTokenizerFast
+
+    vocab = hf_hub_download(checkpoint, "vocab.json")   # raises if not a BPE checkpoint
+    merges = hf_hub_download(checkpoint, "merges.txt")
+    tokenizer_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False).name
+    ByteLevelBPETokenizer(vocab, merges).save(tokenizer_file)
+    tokenizer = PreTrainedTokenizerFast(
+        tokenizer_file=tokenizer_file,
+        bos_token="<s>", eos_token="</s>", unk_token="<unk>",
+        pad_token="<pad>", cls_token="<s>", sep_token="</s>", mask_token="<mask>",
+    )
+    # use_fast=False keeps the image processor off torchvision-only code paths.
+    image_processor = AutoImageProcessor.from_pretrained(checkpoint, use_fast=False)
+    return TrOCRProcessor(image_processor=image_processor, tokenizer=tokenizer)
+
+
 class TrOCREngine(Engine):
     """Microsoft TrOCR, the only genuine handwriting model in the bake-off.
 
@@ -118,12 +156,18 @@ class TrOCREngine(Engine):
     def _load(self) -> None:
         try:
             import torch
-            from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+            from transformers import VisionEncoderDecoderModel
         except ImportError as exc:  # pragma: no cover - depends on environment
             self.unavailable_reason = f"transformers/torch not installed ({exc})"
             return
+
+        try:
+            self._processor = _load_trocr_processor(self.checkpoint)
+        except Exception as exc:  # noqa: BLE001 - surface, never crash the caller
+            self.unavailable_reason = f"could not load {self.checkpoint} tokenizer ({exc})"
+            return
+
         self._torch = torch
-        self._processor = TrOCRProcessor.from_pretrained(self.checkpoint)
         self._model = VisionEncoderDecoderModel.from_pretrained(self.checkpoint)
         self._model.eval()
         torch.set_num_threads(max(1, (torch.get_num_threads() or 4)))
