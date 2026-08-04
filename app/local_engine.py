@@ -20,12 +20,29 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import cv2
+import importlib.util
+import sys
 
-from local_ocr.layout.bootstrap import crop
-from local_ocr.layout.ruled import masks, segment
 from local_ocr.ocr.base import Engine, Field
 from local_ocr.ocr.engines import REGISTRY, build
+
+# OpenCV and the layout stage are imported lazily. The standalone .exe
+# deliberately ships without them (bundling OpenCV and PyTorch would take it
+# from 45 MB to gigabytes), and importing them at module scope would stop the
+# whole server from starting there rather than just disabling one mode.
+cv2 = None  # type: ignore[assignment]
+
+
+def _load_layout():
+    """Import the imaging stack on first use. Raises ImportError if absent."""
+    global cv2
+    import cv2 as _cv2
+
+    from local_ocr.layout.bootstrap import crop
+    from local_ocr.layout.ruled import masks, segment
+
+    cv2 = _cv2
+    return crop, masks, segment
 
 #: Columns are emitted left-to-right by the segmenter in this fixed order.
 _COLUMN_FIELDS = (Field.SURVEY, Field.METER, Field.REMARKS)
@@ -67,8 +84,36 @@ def _is_blank(ink: np.ndarray, box: tuple[int, int, int, int]) -> bool:
         return True
     return float((region > 0).sum()) / region.size < _BLANK_INK_SHARE
 
-#: name -> loaded Engine. Loading TrOCR takes seconds, so keep it around.
+#: name -> loaded Engine. Loading a model takes seconds, so keep it around.
 _ENGINE_CACHE: dict[str, Engine] = {}
+
+#: Which third-party package each engine needs, for the availability check.
+_ENGINE_PACKAGE = {
+    "easyocr": "easyocr",
+    "paddleocr": "paddleocr",
+    "trocr_small": "transformers",
+    "trocr_base": "transformers",
+}
+
+
+def availability(engine_name: str = "") -> tuple[bool, str]:
+    """Can local OCR run here? Checked without importing or loading anything.
+
+    Answered up front so the UI can say so plainly, rather than letting the user
+    upload pages, press the button and wait for a failure.
+    """
+    if getattr(sys, "frozen", False):
+        return False, (
+            "Local OCR is not available in the standalone .exe — bundling OpenCV "
+            "and the OCR engine would take it from 45 MB to gigabytes. "
+            "Run the app with `python run_app.py` to use it, or pick a cloud mode."
+        )
+    if importlib.util.find_spec("cv2") is None:
+        return False, "OpenCV is not installed (pip install opencv-python-headless)."
+    package = _ENGINE_PACKAGE.get(engine_name or "", "")
+    if package and importlib.util.find_spec(package) is None:
+        return False, f"The '{engine_name}' engine needs `pip install {package}`."
+    return True, ""
 
 
 @dataclass
@@ -95,6 +140,11 @@ def get_engine(name: str) -> Engine:
 def recognise_page_local(path: Path | str, engine: Engine) -> LocalResult:
     """Segment one page and read every cell with ``engine``. Never raises."""
     page = Path(path).stem
+    try:
+        crop, masks, segment = _load_layout()
+    except ImportError as exc:
+        return LocalResult(page=page, error=f"local imaging stack unavailable: {exc}")
+
     image = cv2.imread(str(path))
     if image is None:
         return LocalResult(page=page, error="could not read image")

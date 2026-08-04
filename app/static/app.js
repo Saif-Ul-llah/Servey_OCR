@@ -90,6 +90,13 @@ function setMode(mode) {
   el("empty-sub").textContent = isCloud(mode)
     ? `Upload page photos, then Recognise with ${MODE_LABEL[mode]}. Review and correct, then export.`
     : "Upload page photos, then Run local OCR (offline). Review and correct, then export.";
+  // Dim a mode this build cannot run, so it reads as unavailable before it is
+  // clicked rather than only after.
+  const localBtn = el("mode-manual");
+  const localOff = state.settings.local_available === false;
+  localBtn.style.opacity = localOff ? "0.45" : "";
+  localBtn.title = localOff ? (state.settings.local_unavailable_reason || "") : "";
+
   updateRecognizeAvailability();
   settingsStoreMode(mode);
 }
@@ -104,10 +111,23 @@ function updateRecognizeAvailability() {
   const btn = el("recognize-btn");
   const hasImages = state.job && state.images.length > 0;
   const needsKey = isCloud(state.mode) && !hasKeyFor(state.mode);
-  btn.disabled = !hasImages || needsKey;
-  btn.title = !hasImages
-    ? "Upload page photos first"
-    : (needsKey ? `Add a ${MODE_LABEL[state.mode]} API key in Settings first` : "");
+  // Local OCR is absent from the standalone .exe; say so up front rather than
+  // letting the user upload, press the button and wait for a failure.
+  const localBlocked = state.mode === "local" && state.settings.local_available === false;
+  btn.disabled = !hasImages || needsKey || localBlocked;
+  btn.title = localBlocked
+    ? (state.settings.local_unavailable_reason || "Local OCR is unavailable in this build")
+    : !hasImages
+      ? "Upload page photos first"
+      : (needsKey ? `Add a ${MODE_LABEL[state.mode]} API key in Settings first` : "");
+
+  const note = el("mode-note");
+  if (localBlocked) {
+    note.textContent = state.settings.local_unavailable_reason || "";
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
 }
 
 /* --------------------------------------------------------------- upload */
@@ -528,8 +548,12 @@ async function init() {
   setMode(mode);
   renderGrid();
   if (isCloud(mode) && !hasKeyFor(mode)) {
+    // Only offer the offline fallback where it actually exists (it does not in
+    // the standalone .exe), so the hint never sends the user somewhere broken.
     toast("warn", `Add a ${MODE_LABEL[mode]} key`,
-      "Open Settings to enable AI recognition — or switch to Local OCR (offline).");
+      state.settings.local_available === false
+        ? "Open Settings to enable AI recognition."
+        : "Open Settings to enable AI recognition — or switch to Local OCR (offline).");
   }
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSettings(); } });

@@ -101,9 +101,18 @@ def _pages_from_rows(rows: list[GridRow]) -> list[tuple[str, list[dict]]]:
 # -------------------------------------------------------------------- routes
 
 
+def _settings_payload(settings) -> dict:
+    """Public settings plus whether local OCR can actually run in this build."""
+    payload = settings.public()
+    ok, reason = local_engine.availability(settings.local_engine)
+    payload["local_available"] = ok
+    payload["local_unavailable_reason"] = reason
+    return payload
+
+
 @app.get("/api/settings")
 def get_settings() -> dict:
-    return settings_store.load().public()
+    return _settings_payload(settings_store.load())
 
 
 @app.post("/api/settings")
@@ -116,7 +125,7 @@ def post_settings(body: SettingsIn) -> dict:
         local_engine=body.local_engine,
         mode=body.mode,
     )
-    return updated.public()
+    return _settings_payload(updated)
 
 
 @app.post("/api/settings/test")
@@ -225,6 +234,9 @@ def recognize_local(body: RecognizeIn) -> JSONResponse:
         raise HTTPException(status_code=404, detail="Upload session not found. Re-upload the images.")
 
     settings = settings_store.load()
+    available, reason = local_engine.availability(settings.local_engine)
+    if not available:
+        raise HTTPException(status_code=400, detail=reason)
     try:
         engine = local_engine.get_engine(settings.local_engine)
     except KeyError:

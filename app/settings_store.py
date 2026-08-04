@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -42,7 +43,10 @@ DEFAULT_LOCAL_ENGINE = "easyocr"
 
 #: "gemini"/"grok" -> cloud recognition; "local" -> offline OCR engine + rules.
 VALID_MODES = ("gemini", "grok", "local")
-DEFAULT_MODE = "local"
+#: Local OCR by default when running from source -- no key, no network. The
+#: standalone .exe ships without the imaging stack, so it must not open in a
+#: mode it cannot run; there the default is a cloud provider.
+DEFAULT_MODE = "gemini" if getattr(sys, "frozen", False) else "local"
 
 
 @dataclass
