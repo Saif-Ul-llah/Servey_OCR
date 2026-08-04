@@ -116,6 +116,22 @@ counts. `local_ocr/layout/ruled.py` supersedes `bootstrap.py` for local OCR.
   because the printed ruling is darker than the paper.
 - Page time went 598s → 20s from these two changes together.
 
+## Two .exe builds
+
+- `ServeyOCR.spec` -> lean (~45 MB), cloud modes only.
+- `ServeyOCR-Offline.spec` -> ~1-2 GB, bundles OpenCV + torch + EasyOCR
+  **and EasyOCR's weights** from `~/.EasyOCR/model` (an "offline" app that
+  downloads 94 MB on first use is not offline). Needs `collect_all` for those
+  packages — following imports alone leaves the frozen build broken at runtime.
+- **Never key behaviour off `sys.frozen`** now that both builds exist. Probe for
+  what is actually present (`importlib.util.find_spec("cv2")`) to decide the
+  default mode and local-OCR availability; the lean exe must not open in a mode
+  it cannot run, the offline exe should.
+- `app/local_engine.py` imports cv2 and the layout stage **lazily**. At module
+  scope, the lean exe fails to start entirely, because `server.py` imports it.
+- The static UI is baked into the exe, so **a CSS/JS fix needs a rebuild** to
+  reach exe users.
+
 ## UI gotcha that made the app look frozen
 
 - `[hidden] { display: none !important; }` must stay in `styles.css`. A class

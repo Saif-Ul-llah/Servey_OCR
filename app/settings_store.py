@@ -8,9 +8,9 @@ model as a `.env` file. It is never sent anywhere except to Google's API.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -43,10 +43,11 @@ DEFAULT_LOCAL_ENGINE = "easyocr"
 
 #: "gemini"/"grok" -> cloud recognition; "local" -> offline OCR engine + rules.
 VALID_MODES = ("gemini", "grok", "local")
-#: Local OCR by default when running from source -- no key, no network. The
-#: standalone .exe ships without the imaging stack, so it must not open in a
-#: mode it cannot run; there the default is a cloud provider.
-DEFAULT_MODE = "gemini" if getattr(sys, "frozen", False) else "local"
+#: Local OCR by default -- no key, no network -- but only where the imaging
+#: stack is actually present. The lean .exe ships without it and must not open
+#: in a mode it cannot run, while the offline .exe bundles it and should. Probe
+#: rather than assume from ``sys.frozen``: both kinds of build exist.
+DEFAULT_MODE = "local" if importlib.util.find_spec("cv2") is not None else "gemini"
 
 
 @dataclass

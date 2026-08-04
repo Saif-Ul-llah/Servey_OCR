@@ -19,6 +19,18 @@ import numpy as np
 from local_ocr.ocr.base import ALPHABETS, Engine, Field, Recognition, postprocess
 
 
+def _bundled_easyocr_models():
+    """Path to weights shipped inside a frozen build, or None when running from
+    source (where EasyOCR's own cache in ``~/.EasyOCR`` is the right place)."""
+    import sys
+    from pathlib import Path
+
+    if not getattr(sys, "frozen", False):
+        return None
+    candidate = Path(getattr(sys, "_MEIPASS", ".")) / "easyocr_models"
+    return candidate if candidate.is_dir() else None
+
+
 def _to_rgb(image: np.ndarray) -> np.ndarray:
     if image.ndim == 2:
         return np.stack([image] * 3, axis=-1)
@@ -45,7 +57,16 @@ class EasyOCREngine(Engine):
         except ImportError as exc:  # pragma: no cover - depends on environment
             self.unavailable_reason = f"easyocr not installed ({exc})"
             return
-        self._reader = easyocr.Reader(self._languages, gpu=False, verbose=False)
+
+        # A frozen build ships the weights beside itself and must never reach
+        # for the network: an "offline" app that silently downloads 94 MB on
+        # first use is not offline.
+        options: dict = {}
+        bundled = _bundled_easyocr_models()
+        if bundled is not None:
+            options = {"model_storage_directory": str(bundled), "download_enabled": False}
+
+        self._reader = easyocr.Reader(self._languages, gpu=False, verbose=False, **options)
 
     def _recognise(self, image: np.ndarray, field: Field) -> Recognition:
         if self._reader is None:

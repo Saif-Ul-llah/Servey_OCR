@@ -102,17 +102,29 @@ def availability(engine_name: str = "") -> tuple[bool, str]:
     Answered up front so the UI can say so plainly, rather than letting the user
     upload pages, press the button and wait for a failure.
     """
-    if getattr(sys, "frozen", False):
-        return False, (
-            "Local OCR is not available in the standalone .exe — bundling OpenCV "
-            "and the OCR engine would take it from 45 MB to gigabytes. "
-            "Run the app with `python run_app.py` to use it, or pick a cloud mode."
-        )
+    frozen = getattr(sys, "frozen", False)
+    #: The lean build ships without the imaging stack; the offline build bundles
+    #: it. Detecting what is actually present beats assuming from `frozen`,
+    #: because both kinds of .exe exist.
+    lean_exe_hint = (
+        " This is the lean build — use ServeyOCR-Offline.exe, or run "
+        "`python run_app.py`, for offline OCR."
+        if frozen
+        else ""
+    )
     if importlib.util.find_spec("cv2") is None:
-        return False, "OpenCV is not installed (pip install opencv-python-headless)."
+        return False, (
+            "Local OCR needs OpenCV, which is not available here." + lean_exe_hint
+            if frozen
+            else "OpenCV is not installed (pip install opencv-python-headless)."
+        )
     package = _ENGINE_PACKAGE.get(engine_name or "", "")
     if package and importlib.util.find_spec(package) is None:
-        return False, f"The '{engine_name}' engine needs `pip install {package}`."
+        return False, (
+            f"The '{engine_name}' engine is not available here." + lean_exe_hint
+            if frozen
+            else f"The '{engine_name}' engine needs `pip install {package}`."
+        )
     return True, ""
 
 

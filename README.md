@@ -22,17 +22,35 @@ The app opens at `http://127.0.0.1:8000` (loopback only — nothing is exposed t
 the network). On first run, click **Settings**, paste a
 [Gemini API key](https://aistudio.google.com/app/apikey), **Test**, **Save**.
 
-### Or the standalone `.exe` (no Python needed)
+### Or a standalone `.exe` (no Python needed)
 
-`dist\ServeyOCR.exe` is a single self-contained executable — **double-click it**
-and the app opens in your browser. Rebuild after code changes with
-`build_exe.bat` (or `python -m PyInstaller ServeyOCR.spec --noconfirm`).
+**Double-click and the app opens in your browser.** Two builds, because the
+local OCR stack is most of the weight:
+
+| Executable | Size | Modes | Needs |
+|---|---|---|---|
+| `dist\ServeyOCR.exe` | ~45 MB | Gemini, Grok | an API key + internet |
+| `dist\ServeyOCR-Offline.exe` | ~1–2 GB | **all three**, incl. Local OCR | nothing — fully offline |
+
+The offline build bundles OpenCV, PyTorch and EasyOCR *with its weights*, so it
+never downloads anything on first run. It starts more slowly (it unpacks itself)
+and the first local OCR run pays a one-off model-load cost.
+
+Each build knows what it can do: the lean one opens in Gemini mode and greys out
+Local OCR with an explanation, rather than offering a mode that would fail.
+
+Rebuild with `build_exe.bat` (it asks which build), or directly:
+
+```bash
+python -m PyInstaller ServeyOCR.spec --noconfirm            # lean
+python -m PyInstaller ServeyOCR-Offline.spec --noconfirm    # offline
+```
 
 - Keep the exe in its own folder: your saved key (`app_settings.json`) and the
   `output\` folder are written next to it.
-- First launch is a few seconds slower (it unpacks itself), and Windows
-  SmartScreen/Defender may prompt because the exe is unsigned — choose
-  *More info → Run anyway*.
+- First launch is slower (it unpacks itself — noticeably so for the offline
+  build), and Windows SmartScreen/Defender may prompt because the exe is
+  unsigned — choose *More info → Run anyway*.
 
 ---
 
@@ -132,8 +150,7 @@ Caveats, stated plainly:
 - **Accuracy is capped by the segmenter**, which is a bootstrap and is rough on
   the WhatsApp-compressed samples (better on full-res originals). The review
   grid is where you catch its mistakes; low-confidence cells are flagged.
-- **Not available in the standalone `.exe`** — bundling PyTorch would balloon it
-  to gigabytes. Use `python run_app.py` for local mode; the exe is Gemini-only.
+- **Not in the lean `.exe`** — use `ServeyOCR-Offline.exe` or `python run_app.py`.
 
 **Why a cloud model is the default:** a local 3B *vision* model reserves ~10 GB
 at runtime and this 8 GB machine can't hold it. Gemini and Grok read the whole
