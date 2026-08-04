@@ -100,6 +100,31 @@ counts. `local_ocr/layout/ruled.py` supersedes `bootstrap.py` for local OCR.
 - **Bias to over-detect rows.** Assembly drops rows with no ink in any column,
   so a spare blank band costs nothing while a missed one silently loses a meter.
 
+## Local OCR engine: EasyOCR, chosen by measurement
+
+- **EasyOCR beats TrOCR here**, despite TrOCR being the "handwriting" model.
+  page_08 vs golden set: EasyOCR 3/7 codes exact, 5/7 digit strings, 0.65s/cell;
+  TrOCR-base 0/7 exact, 3/7 digits, ~4s/cell. The hand is neat block capitals
+  and digits — scene-text territory, not English prose. TrOCR's word bias is
+  exactly why it produced `CONTEMPTATION`.
+- EasyOCR's **confidence is calibrated** (high = right, low = wrong), so the
+  low-confidence review flag actually works. Do not swap it for an engine whose
+  confidence is uninformative without re-checking that.
+- **Skip blank cells before inference** (`app/local_engine._is_blank`). Rows are
+  over-detected on purpose, so ~25% of cells are empty. Test against the
+  *rule-subtracted* ink mask — thresholding the raw crop calls every cell inked,
+  because the printed ruling is darker than the paper.
+- Page time went 598s → 20s from these two changes together.
+
+## UI gotcha that made the app look frozen
+
+- `[hidden] { display: none !important; }` must stay in `styles.css`. A class
+  selector (`.overlay { display:flex }`) outranks the browser's own `[hidden]`
+  rule, so without it the loading overlay and settings modal paint over the app
+  from first render and nothing is clickable — it looks like a stuck "Working…".
+- **Render the page in a browser before calling UI work done.** This bug was
+  invisible to HTTP-level endpoint tests, which all passed.
+
 ## Known limitations
 
 - Local OCR accuracy on the WhatsApp-compressed samples is still modest

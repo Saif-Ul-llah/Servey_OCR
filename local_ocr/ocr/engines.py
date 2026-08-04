@@ -153,6 +153,7 @@ class TrOCREngine(Engine):
         #: Restrict decoding to the field's grammar. Off only for benchmarking
         #: how much the constraint is worth.
         self.constrain = constrain
+        self.num_beams = 2
         self._processor = None
         self._model = None
         self._constraints: dict[Field, object] = {}
@@ -202,8 +203,11 @@ class TrOCREngine(Engine):
         with self._torch.no_grad():
             generated = self._model.generate(
                 pixel_values,
-                max_new_tokens=24,
-                num_beams=4,
+                max_new_tokens=16,
+                # Two beams, not four: with the grammar constraint the decoder
+                # can no longer wander into a plausible English word, so the
+                # extra beams buy far less than they cost on CPU.
+                num_beams=self.num_beams,
                 output_scores=True,
                 return_dict_in_generate=True,
                 logits_processor=[processor] if processor is not None else None,

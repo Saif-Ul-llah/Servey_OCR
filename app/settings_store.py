@@ -28,14 +28,21 @@ DEFAULT_MODEL = "gemini-2.0-flash"
 #: Test button confirms the name against the account actually being used.
 DEFAULT_GROK_MODEL = "grok-4-fast"
 
-#: Local (offline) OCR engine used when mode == "local". TrOCR is the only real
-#: handwriting model in the registry. Default is the *base* checkpoint: the
-#: *small* one ships a SentencePiece tokenizer that transformers 5.x cannot load
-#: on this Python 3.14 stack, whereas base's BPE tokenizer loads fine.
-DEFAULT_LOCAL_ENGINE = "trocr_base"
+#: Local (offline) OCR engine used when mode == "local".
+#:
+#: EasyOCR, not TrOCR, despite TrOCR being the "handwriting" model. Measured on
+#: page_08 against the golden set: EasyOCR read 3 meter codes exactly and 5 of 7
+#: digit strings, TrOCR-base none and 3 of 7 -- and EasyOCR is ~6x faster
+#: (0.65s vs ~4s per cell, i.e. a page in a minute instead of ten). The reason
+#: is the hand itself: these are neat block capitals and digits, closer to the
+#: printed signage EasyOCR was trained on than to the English prose TrOCR
+#: expects. EasyOCR also takes the field alphabet as a decoder allowlist, and
+#: its confidence tracks correctness closely enough to drive review flagging.
+DEFAULT_LOCAL_ENGINE = "easyocr"
 
 #: "gemini"/"grok" -> cloud recognition; "local" -> offline OCR engine + rules.
 VALID_MODES = ("gemini", "grok", "local")
+DEFAULT_MODE = "local"
 
 
 @dataclass
@@ -45,7 +52,10 @@ class AppSettings:
     grok_api_key: str = ""
     grok_model: str = DEFAULT_GROK_MODEL
     local_engine: str = DEFAULT_LOCAL_ENGINE
-    mode: str = "gemini"
+    #: Local OCR is the default: it works out of the box with no API key, and
+    #: needs no network. The cloud modes are more accurate but must be enabled
+    #: by pasting a key into Settings.
+    mode: str = DEFAULT_MODE
 
     @property
     def has_key(self) -> bool:
@@ -95,7 +105,7 @@ def load() -> AppSettings:
         grok_api_key=str(data.get("grok_api_key", "") or ""),
         grok_model=str(data.get("grok_model") or DEFAULT_GROK_MODEL),
         local_engine=str(data.get("local_engine") or DEFAULT_LOCAL_ENGINE),
-        mode=str(data.get("mode") or "gemini"),
+        mode=str(data.get("mode") or DEFAULT_MODE),
     )
     # The environment fills a blank key only, so a key typed into the UI is
     # never shadowed by a stale shell variable.
@@ -110,7 +120,7 @@ def load() -> AppSettings:
     if settings.mode == "manual":  # legacy value -> the offline OCR mode
         settings.mode = "local"
     if settings.mode not in VALID_MODES:
-        settings.mode = "gemini"
+        settings.mode = DEFAULT_MODE
     return settings
 
 

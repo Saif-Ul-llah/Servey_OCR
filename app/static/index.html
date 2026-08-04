@@ -168,10 +168,10 @@
         <div class="field">
           <label for="engine-select">Local OCR engine <span class="field-tag">offline mode</span></label>
           <select id="engine-select">
-            <option value="trocr_base">TrOCR-base &mdash; handwriting, best accuracy (recommended)</option>
-            <option value="trocr_small">TrOCR-small &mdash; lighter, but not supported on this Python 3.14 build</option>
-            <option value="easyocr">EasyOCR &mdash; fast, scene-text</option>
+            <option value="easyocr">EasyOCR &mdash; most accurate here, ~6&times; faster (recommended)</option>
+            <option value="trocr_base">TrOCR-base &mdash; handwriting model, slower (~10 min/page)</option>
             <option value="paddleocr">PaddleOCR &mdash; fast, scene-text</option>
+            <option value="trocr_small">TrOCR-small &mdash; not supported on this Python 3.14 build</option>
           </select>
           <p class="hint">Runs fully offline. Requires the engine installed in this Python
           environment (TrOCR needs <code>torch</code> + <code>transformers</code>). Not available in the

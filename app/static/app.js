@@ -6,7 +6,7 @@
    ========================================================================== */
 
 const state = {
-  mode: "gemini",
+  mode: "local",
   job: null,
   images: [],       // [{name, url}]
   activeImage: null,
@@ -15,7 +15,7 @@ const state = {
   settings: {
     has_key: false, has_gemini_key: false, has_grok_key: false,
     gemini_model: "gemini-2.0-flash", grok_model: "grok-4-fast",
-    local_engine: "trocr_base", mode: "gemini",
+    local_engine: "easyocr", mode: "local",
   },
 };
 
@@ -459,7 +459,7 @@ function openSettings(provider) {
     ? provider
     : (state.mode === "grok" ? "grok" : "gemini");
   Object.keys(draftModel).forEach((k) => delete draftModel[k]);
-  el("engine-select").value = state.settings.local_engine || "trocr_base";
+  el("engine-select").value = state.settings.local_engine || "easyocr";
   renderProviderTab();
   modal.hidden = false;
 }
@@ -524,7 +524,7 @@ async function init() {
   try {
     state.settings = await apiGet("/api/settings");
   } catch { /* server default is fine */ }
-  const mode = state.settings.mode || "gemini";
+  const mode = state.settings.mode || "local";
   setMode(mode);
   renderGrid();
   if (isCloud(mode) && !hasKeyFor(mode)) {

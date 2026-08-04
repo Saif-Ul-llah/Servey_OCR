@@ -44,9 +44,13 @@ and differ only in *which* recognizer reads the pages:
 
 | Mode | What reads the pages | Needs |
 |---|---|---|
+| **Local OCR** *(default)* | The local segmenter crops each cell and a local engine (EasyOCR) reads it — no cloud. | engine installed (see below); fully offline |
 | **Gemini** | Google Gemini reads each page (layout + handwriting together) into raw rows. | API key + internet |
 | **Grok** | xAI Grok, same job via an OpenAI-compatible vision endpoint. | API key + internet |
-| **Local OCR** | The local segmenter crops each cell and a local engine (TrOCR) reads it — no cloud. | engine installed (see below); fully offline |
+
+Local OCR is the default because it works with no API key and no network. The
+cloud modes are more accurate on these images; switch with the top-bar toggle
+once you have pasted a key into Settings.
 
 Each cloud provider keeps its own key and model in Settings, and **Test key**
 confirms both against the live API before you rely on them. Model names are
@@ -75,13 +79,26 @@ each cell, then the same correction/assembly/audit runs. Install an engine into
 the Python environment first (TrOCR is the only true handwriting model):
 
 ```bash
+python -m pip install easyocr             # the default engine
+# optional alternatives:
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-python -m pip install transformers        # TrOCR-base (default)
-# or, lighter but scene-text (weaker on handwriting):
-python -m pip install easyocr             # or: paddleocr paddlepaddle
+python -m pip install transformers        # TrOCR-base
 ```
 
-Pick the engine in **Settings → Local OCR engine** (default **TrOCR-base**).
+Pick the engine in **Settings → Local OCR engine**. The default is **EasyOCR**,
+chosen by measurement rather than reputation — on page_08 against the golden set:
+
+| Engine | Codes exactly right | Digit strings right | Speed |
+|---|---|---|---|
+| **EasyOCR** | **3 / 7** | **5 / 7** | **0.65 s/cell — page in ~20 s** |
+| TrOCR-base | 0 / 7 | 3 / 7 | ~4 s/cell — page in ~10 min |
+
+TrOCR is the "handwriting" model, but this hand is neat block capitals and
+digits — closer to the printed signage EasyOCR was trained on than to the
+English prose TrOCR expects, which is why TrOCR reached for words like
+`CONTEMPTATION`. EasyOCR also takes the field alphabet as a decoder allowlist,
+and its confidence tracks correctness closely enough to drive review flagging:
+in that run every correct code auto-accepted and every wrong one was flagged.
 
 Two things make this mode workable rather than useless, both measured on the
 golden set:

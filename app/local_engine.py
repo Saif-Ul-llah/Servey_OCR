@@ -23,12 +23,49 @@ from pathlib import Path
 import cv2
 
 from local_ocr.layout.bootstrap import crop
-from local_ocr.layout.ruled import segment
+from local_ocr.layout.ruled import masks, segment
 from local_ocr.ocr.base import Engine, Field
 from local_ocr.ocr.engines import REGISTRY, build
 
 #: Columns are emitted left-to-right by the segmenter in this fixed order.
 _COLUMN_FIELDS = (Field.SURVEY, Field.METER, Field.REMARKS)
+
+#: A cell holding less than this share of *handwriting* pixels is blank paper.
+#: Rows are deliberately over-detected by the segmenter (a spare blank band is
+#: free, a missed one loses a meter), so most cells on a page carry no writing.
+#: Skipping them is the single largest speed win available, and it also removes
+#: a source of invented values -- a model asked to read blank paper answers
+#: anyway.
+_BLANK_INK_SHARE = 0.004
+#: Padding used by `crop`, mirrored here so the ink test looks at the same box.
+_CROP_PAD = 4
+
+
+def _cell_box(geometry, row: int, column: int, shape) -> tuple[int, int, int, int]:
+    """The pixel box `crop` would cut, as ``(y0, y1, x0, x1)``."""
+    tx, ty = geometry.target[0], geometry.target[1]
+    top, bottom = geometry.rows[row]
+    left, right = geometry.columns[column]
+    y0 = max(0, ty + top - _CROP_PAD)
+    y1 = min(shape[0], ty + bottom + _CROP_PAD)
+    x0 = max(0, tx + left - _CROP_PAD)
+    x1 = min(shape[1], tx + right + _CROP_PAD)
+    return y0, y1, x0, x1
+
+
+def _is_blank(ink: np.ndarray, box: tuple[int, int, int, int]) -> bool:
+    """Ink test against the rule-subtracted mask.
+
+    Thresholding the raw crop does not work: the printed ruling is darker than
+    the paper, so every empty cell looks inked and almost nothing gets skipped.
+    The mask from the layout stage has already removed the rules, so what is
+    left is handwriting.
+    """
+    y0, y1, x0, x1 = box
+    region = ink[y0:y1, x0:x1]
+    if region.size == 0:
+        return True
+    return float((region > 0).sum()) / region.size < _BLANK_INK_SHARE
 
 #: name -> loaded Engine. Loading TrOCR takes seconds, so keep it around.
 _ENGINE_CACHE: dict[str, Engine] = {}
@@ -70,11 +107,16 @@ def recognise_page_local(path: Path | str, engine: Engine) -> LocalResult:
     if not geometry.rows:
         return LocalResult(page=page, error="no rows of handwriting detected")
 
+    ink, _ = masks(image)
     rows: list[dict] = []
     for row_index in range(len(geometry.rows)):
         text: dict[str, str] = {}
         conf: dict[str, float] = {}
         for column, field_kind in enumerate(_COLUMN_FIELDS):
+            if _is_blank(ink, _cell_box(geometry, row_index, column, image.shape)):
+                text[field_kind.value] = ""
+                conf[field_kind.value] = 0.0
+                continue
             cell_image = crop(image, geometry, row_index, column)
             recognition = engine.recognise(cell_image, field_kind)
             text[field_kind.value] = recognition.text
