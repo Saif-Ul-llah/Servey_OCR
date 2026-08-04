@@ -1,0 +1,96 @@
+# Servey OCR — user-editable configuration.
+# Every value here is validated against local_ocr/config/schema.py at load time.
+
+input:
+  folder: "./samples/images_hires"
+  formats: [jpg, jpeg, png, bmp, tif, tiff]
+  recursive: false
+
+output:
+  folder: "./output"
+  filename_pattern: "SERVEY_OCR_{date}_{time}.xlsx"
+  # The reference workbook is a single sheet with exactly three columns.
+  # Review data is written to a sidecar file, never into the deliverable.
+  sheet_name: "New XLSX Worksheet"
+  headers: ["SERVEY #", "METER#", "REMARKS"]
+  write_review_sidecar: true
+  review_sidecar_suffix: "_review"
+  backup_previous: true
+
+preprocessing:
+  # Rule-line-anchored dewarp. The notebook's printed rules give us both the
+  # warp field and exact row boundaries; see docs/design_notes.md.
+  dewarp_from_rules: true
+  # Blue-ballpoint separation removes printed rules AND reverse-side bleed-through.
+  ink_separation: hsv        # hsv | lab | grayscale
+  ink_min_saturation: 60     # 0-255; below this a pixel is paper/rule/bleed-through
+  ink_max_value: 200         # 0-255; ink is darker than this
+  normalise_illumination: true
+  upscale_factor: 3          # applied to cell crops before recognition; 1 disables
+  upscale_method: lanczos    # lanczos | fsrcnn
+
+layout:
+  # Expected number of text columns on a page: survey / meter / remarks.
+  columns: 3
+  # A bracket is a tall thin component to the right of the meter column.
+  bracket_min_height_ratio: 1.5   # x line pitch
+  bracket_max_width_ratio: 0.35   # x line pitch
+  debug_overlays: false
+  debug_overlay_folder: "./debug_overlays"
+
+ocr:
+  primary_engine: trocr_small     # set from the Phase 0 bake-off result
+  ensemble_engines: [trocr_small] # add more once evaluated; >1 enables agreement scoring
+  constrained_decoding: true
+  split_prefix_and_digits: true
+  auto_accept_confidence: 0.97    # calibrated on the golden set for ~100% precision
+
+domain:
+  survey_prefix: "KE-"
+  meter_pattern: "^[A-Z]{2,3}\\d{5}$"
+  meter_pattern_relaxed: "^[A-Z]{2,3}\\d{5,6}$"   # LA... codes carry 6 digits
+  prefix_whitelist_file: "./config/meter_prefixes.txt"
+  section_markers_file: "./config/section_markers.txt"
+  special_tokens_file: "./config/special_tokens.yaml"
+  fuzzy_prefix_threshold: 85
+  # Optional: a master list of valid meter numbers, one per line. When present,
+  # OCR output snaps to the nearest valid entry within `known_meters_max_distance`.
+  # No such list exists today; the hook is here so one can be dropped in later.
+  known_meters_file: null
+  known_meters_max_distance: 1
+  # Side codes are written +37 / #37 / +128 on the page and stored as -37 / -128
+  # in the reference workbook. Lone codes become numeric cells.
+  annotation_pattern: "^[+#]?(\\d{1,4})$"
+  annotation_output_sign: "-"
+  drop_non_latin_remarks: true
+
+assembly:
+  # Pages are ordered by their detected survey range, not by filename.
+  order_by: survey_range
+  audit_survey_continuity: true
+  # Duplicate meter codes are reported, never dropped. A duplicate means either
+  # a misread or a page photographed twice, and deciding which is a human's job;
+  # deleting a row automatically would be exactly the silent data loss this
+  # pipeline exists to avoid.
+  audit_meter_uniqueness: true
+  # Groups that start on one photo and continue on the next: the surveyor
+  # rewrites the number at the top of the continuing page, the workbook does not.
+  heal_groups_across_pages: true
+  # Free-text remarks bind to the group's first row (which may sit on an earlier page).
+  bind_text_remarks_to: group_first_row
+  # Numeric side codes bind to the meter row they are vertically aligned with.
+  bind_annotations_to: aligned_row
+
+processing:
+  workers: 4
+  batch_size: 50
+
+logging:
+  level: INFO
+  folder: "./logs"
+  rotate_daily: true
+  corrections_log: "./logs/corrections.jsonl"
+
+gui:
+  review_threshold: 0.97
+  autosave_interval_seconds: 30

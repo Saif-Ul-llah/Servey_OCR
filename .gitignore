@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# runtime artefacts
+logs/
+output/
+models/
+build/
+dist/
+
+# secrets — holds the Gemini API key, NEVER commit
+config/app_settings.json
+
+# real survey data — kept out of the repo (see README / AGENTS.md)
+Samples or examle data/
+samples/images_lowres/
+samples/images_hires/
+samples/crops/
+samples/ground_truth.csv
+debug_overlays/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,22 @@
+# Lines matching any of these regexes are structural markers, not data.
+# They are skipped during extraction and recorded in the page log.
+# One Python regex per line; matched case-insensitively against the whole line
+# after whitespace collapsing. Blank lines and '#' comments are ignored.
+
+# "End Block "C"" / End Block 'C' / End Block C   (attested on the KE-680..683 page)
+^end\s+block\s*["'`]?[a-z]["'`]?\.?$
+
+# Hand-drawn divider: x — x — x  (also written with *, X, or multiplication sign)
+^[\s\-_=~—–]*([x*×][\s\-_=~—–]*){2,}$
+
+# A run of dashes/underscores used as a rule
+^[\s\-_=~—–]{4,}$
+
+# Repeated column headers if the surveyor re-writes them on a new page
+^servey\s*#?$
+^survey\s*#?$
+^meter\s*#?$
+^remarks?$
+
+# Bare page numbers at the foot of a page
+^p(age)?\.?\s*\d{1,3}$

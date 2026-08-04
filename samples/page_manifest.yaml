@@ -1,0 +1,120 @@
+# Golden-set manifest: which notebook page each sample photo shows, and which
+# rows of the reference workbook it corresponds to.
+#
+# Established by reading all 12 photos against
+# "Samples or examle data/SACHAL SURVEY - IMAGES DATA.xlsx". The 12 photos cover
+# a *contiguous* run, KE-570 -> KE-683 == workbook rows 596-882 == 287 rows.
+# That is why no manual ground-truth authoring is needed.
+#
+# `first_row` / `last_row` are 1-based worksheet row numbers (row 1 is the header).
+# They are inclusive and must tile the range 596..882 with no gaps or overlaps;
+# scripts/build_golden_set.py asserts this.
+#
+# Two groups straddle a page break -- KE-619 and KE-673 -- and the surveyor
+# rewrote the survey number at the top of the continuing page. The workbook
+# labels such a group only once, on its first row. `continues_previous_group`
+# records this so the assembly stage can be tested against it.
+#
+# When the full-resolution originals arrive, drop them in samples/images_hires/
+# and either name them page_01.jpg .. page_12.jpg or update `source` below.
+
+workbook: "Samples or examle data/SACHAL SURVEY - IMAGES DATA.xlsx"
+sheet: "New XLSX Worksheet"
+source_folder: "Samples or examle data"
+
+pages:
+  - id: page_01
+    source: "WhatsApp Image 2026-07-22 at 1.43.14 PM (1).jpeg"
+    surveys: "570-586"
+    first_row: 596
+    last_row: 619
+    continues_previous_group: false
+    notes: "Struck-out then rewritten meter: 'SCO 813(7)6 | 81376'. Side codes +42 +128 on KE-581."
+
+  - id: page_02
+    source: "WhatsApp Image 2026-07-22 at 1.43.14 PM.jpeg"
+    surveys: "587-601"
+    first_row: 620
+    last_row: 643
+    continues_previous_group: false
+    notes: "'No meter' + 'Vacant plot' on KE-599. Side code +128 on SCP52917. Heavy bleed-through."
+
+  - id: page_03
+    source: "WhatsApp Image 2026-07-22 at 1.43.08 PM.jpeg"
+    surveys: "602-612"
+    first_row: 644
+    last_row: 668
+    continues_previous_group: false
+    notes: "Ditto mark in the REMARKS column: 'Imam Bargah' + '\"' -> two rows."
+
+  - id: page_04
+    source: "WhatsApp Image 2026-07-22 at 1.43.07 PM (2).jpeg"
+    surveys: "613-619"
+    first_row: 669
+    last_row: 692
+    continues_previous_group: false
+    notes: "KE-619 starts here and continues onto page_05."
+
+  - id: page_05
+    source: "WhatsApp Image 2026-07-22 at 1.43.07 PM (1).jpeg"
+    surveys: "619-625"
+    first_row: 693
+    last_row: 717
+    continues_previous_group: true
+    notes: "Opens with a rewritten '619' heading a group that began on page_04; must NOT emit a second KE-619."
+
+  - id: page_06
+    source: "WhatsApp Image 2026-07-22 at 1.43.07 PM.jpeg"
+    surveys: "626-632"
+    first_row: 718
+    last_row: 742
+    continues_previous_group: false
+    notes: "Facing page's remarks column bleeds into the left edge of the frame."
+
+  - id: page_07
+    source: "WhatsApp Image 2026-07-22 at 1.43.06 PM (1).jpeg"
+    surveys: "633-644"
+    first_row: 743
+    last_row: 766
+    continues_previous_group: false
+    notes: "Arrow confirmation 'SCE 10194 <- 10194'. Side code +27 next to 'No metd' that the workbook drops."
+
+  - id: page_08
+    source: "WhatsApp Image 2026-07-22 at 1.43.06 PM.jpeg"
+    surveys: "645-653"
+    first_row: 767
+    last_row: 788
+    continues_previous_group: false
+    notes: "'Shop' written beside the 3rd meter of KE-646 but recorded on KE-646's first row. Three ditto marks."
+
+  - id: page_09
+    source: "WhatsApp Image 2026-07-22 at 1.43.05 PM.jpeg"
+    surveys: "654-666"
+    first_row: 789
+    last_row: 814
+    continues_previous_group: false
+    notes: "Densest hard-case page: 4 ditto marks (one crossing a group boundary), a struck-out meter, and side codes #37 +24 +37 +37."
+
+  - id: page_10
+    source: "WhatsApp Image 2026-07-22 at 1.43.01 PM (1).jpeg"
+    surveys: "667-673"
+    first_row: 815
+    last_row: 839
+    continues_previous_group: false
+    notes: "Two Urdu remarks that the workbook drops entirely. Circled '4' in '(4) Shops'. KE-673 continues onto page_11."
+
+  - id: page_11
+    source: "WhatsApp Image 2026-07-22 at 1.43.01 PM.jpeg"
+    surveys: "673-679"
+    first_row: 840
+    last_row: 863
+    continues_previous_group: true
+    notes: "'3 Shops' written here belongs to KE-673, whose first row is on page_10. Cross-page remark binding."
+
+  - id: page_12
+    source: "WhatsApp Image 2026-07-22 at 1.42.58 PM.jpeg"
+    surveys: "680-683"
+    first_row: 864
+    last_row: 882
+    continues_previous_group: false
+    notes: "Ends with section markers 'x - x - x' and 'End Block \"C\"' which must not be transcribed."

@@ -1,0 +1,75 @@
+# Meter-code prefix whitelist -- GENERATED FILE, do not hand-edit.
+#
+# Source:    SACHAL SURVEY - IMAGES DATA.xlsx
+# Regenerate: python scripts/derive_prefixes.py
+#
+# Format: PREFIX<TAB>observed_count
+# The count lets the fuzzy matcher prefer common prefixes when two
+# candidates score equally. To add a prefix seen in the field but absent
+# here, append it with a count of 0 and note it in docs/adding_prefixes.md.
+
+LA	3
+PSA	23
+SAA	4
+SAG	2
+SAH	3
+SAJ	1
+SAL	5
+SAP	8
+SAS	4
+SAT	2
+SAU	1
+SAY	3
+SC	1
+SCA	8
+SCC	8
+SCE	6
+SCF	9
+SCG	6
+SCH	1
+SCI	3
+SCJ	10
+SCL	19
+SCO	70
+SCP	34
+SCS	5
+SCT	23
+SCU	6
+SE	1
+SEA	20
+SEC	1
+SEE	29
+SEF	4
+SEG	43
+SEJ	1
+SEL	26
+SEO	12
+SEP	6
+SES	16
+SET	21
+SEU	15
+SEY	5
+SFA	16
+SFC	43
+SFE	46
+SFF	32
+SFG	14
+SFH	11
+SFI	10
+SFJ	9
+SFL	50
+SFO	19
+SFP	19
+SFS	14
+SFT	13
+SFU	9
+SFY	40
+SGA	18
+SGC	16
+SP	1
+SX	1
+SY	1
+TS	3
+TT	4
+TY	2
+TZ	3

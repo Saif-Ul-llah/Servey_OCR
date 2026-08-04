@@ -1,0 +1,26 @@
+# Non-meter values that may appear in the METER# column.
+#
+# `output` is written verbatim into the workbook. `variants` are matched against
+# the OCR text case-insensitively after whitespace collapsing, using Levenshtein
+# distance <= `max_distance` (so "No metd" and "no meter" both resolve).
+#
+# All five `output` values below are attested in
+# "Samples or examle data/SACHAL SURVEY - IMAGES DATA.xlsx".
+
+max_distance: 2
+
+tokens:
+  - output: "NoMeter"
+    variants: ["no meter", "nometer", "no metar", "no mtr", "meter not found"]
+
+  - output: "MeterMissing"
+    variants: ["meter missing", "missing meter", "metermissing"]
+
+  - output: "EmptyPlot"
+    variants: ["empty plot", "emptyplot", "vacant plot"]
+
+  - output: "Empty"
+    variants: ["empty"]
+
+  - output: "Plot"
+    variants: ["plot"]

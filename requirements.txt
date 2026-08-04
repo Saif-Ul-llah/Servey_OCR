@@ -1,0 +1,27 @@
+# --- core (needed for everything, no ML) ---
+numpy>=1.26
+opencv-python-headless>=4.9
+pillow>=10.2
+openpyxl>=3.1
+pandas>=2.2
+pyyaml>=6.0
+pydantic>=2.6
+rapidfuzz>=3.6
+loguru>=0.7
+tqdm>=4.66
+
+# --- desktop app (FastAPI UI + Gemini cloud recognition) ---
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9   # file uploads
+requests>=2.31            # Gemini REST calls
+
+# --- optional local OCR engines (deterministic core does not need them) ---
+# torch                    # CPU wheel: pip install torch --index-url https://download.pytorch.org/whl/cpu
+# transformers>=4.40       # TrOCR handwritten
+# paddleocr>=2.7           # PaddleOCR
+# paddlepaddle>=2.6        # PaddleOCR backend (CPU)
+# easyocr>=1.7             # EasyOCR
+
+# --- dev ---
+pytest>=8.0

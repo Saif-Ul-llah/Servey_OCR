@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-ocr"
+version = "0.1.0"
+description = "Offline OCR pipeline turning handwritten survey notebook pages into the reference XLSX format"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["local_ocr*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "slow: tests that load OCR models or process full pages",
+    "needs_images: tests that require sample images on disk",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
