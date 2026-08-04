@@ -9,11 +9,22 @@ code alone. Newest context at the top of each section.
   name — it's the surveyed area, and survives only in the real source-data
   filename `SACHAL SURVEY - IMAGES DATA.xlsx`, which must not be renamed.
 
-## Two recognition modes, one flow
+## Provider model names (verified against the live APIs, Aug 2026)
 
-- The app has **two modes** sharing the flow
+- **xAI Grok:** `grok-2-vision-1212`, `grok-2-vision`, `grok-vision-beta`,
+  `grok-beta`, `grok-2-latest` are all **retired — they 404**. Live names:
+  `grok-4`, `grok-4-fast` (default), `grok-4-latest`, `grok-3`. xAI validates the
+  model name *before* the key, so an invalid key still distinguishes
+  "Model not found" from "Incorrect API key" — a cheap way to probe valid names.
+- Because names churn, both providers' model fields are **free text with
+  suggestions**, not closed dropdowns, and Settings has a Test button.
+
+## Three recognition modes, one flow
+
+- The app has **three modes** sharing the flow
   `upload → recognise → correction → review/edit → export`:
-  - **Gemini AI** (default) — cloud, `app/recognizer.py`.
+  - **Gemini** (default) and **Grok** — cloud, both in `app/recognizer.py`
+    behind one provider table; each has its own key + model.
   - **Local OCR** (offline) — `app/local_engine.py`: the `local_ocr.layout`
     segmenter crops cells, a `local_ocr.ocr` engine (**TrOCR-base** default)
     reads them. Chosen in Settings. "Manual typing" is NOT the offline mode —
@@ -67,8 +78,32 @@ code alone. Newest context at the top of each section.
 - Paths are PyInstaller-frozen-aware (`local_ocr/paths.py`): read-only bundle vs
   writable data-next-to-exe.
 
+## Segmentation: what actually works (and what does not)
+
+Measured with `scripts/eval_segmentation.py` against the manifest's known row
+counts. `local_ocr/layout/ruled.py` supersedes `bootstrap.py` for local OCR.
+
+- **Do not hunt for the fold.** It is not the darkest column (the page's own
+  shadow wins) and not the biggest break in the ruling — handwriting sitting on
+  the rules breaks *them* and manufactures a deeper trough in the middle of the
+  text. That put the split through the meter column and produced half-codes;
+  the crops fed to the model were literally blank paper.
+- **Do cluster ink columns instead.** The fold is the blank band between blocks;
+  the densest block is the page. Column boundaries are the ink "valleys",
+  scored against the *strongest* neighbouring column (against the weakest, a
+  chance dip inside the meter column beats the real boundary).
+- **Rows are the bands between printed rules**, found as wide-thin connected
+  components (a short opening kernel — pages are photographed at an angle, so a
+  long straight kernel misses tilted rules), then regularised on the median
+  pitch to fill missed lines, then phase-shifted so boundaries fall between
+  lines of writing rather than through them.
+- **Bias to over-detect rows.** Assembly drops rows with no ink in any column,
+  so a spare blank band costs nothing while a missed one silently loses a meter.
+
 ## Known limitations
 
-- The bootstrap segmenter (`local_ocr/layout/`) is not usable unsupervised
-  (right page 9/12, row counts often wrong). It's only for the optional local
-  engines; Gemini does its own layout, so this doesn't affect normal use.
+- Local OCR accuracy on the WhatsApp-compressed samples is still modest
+  (~half the digit strings exact) — the glyphs are ~18px. Cloud modes are much
+  better on this data. Re-check segmentation thresholds when full-resolution
+  originals arrive; the approach is structural, but the constants were fitted at
+  960x1280.

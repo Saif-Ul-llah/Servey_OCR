@@ -40,18 +40,23 @@ _JOBS: dict[str, dict[str, Path]] = {}
 class SettingsIn(BaseModel):
     gemini_api_key: str | None = None
     gemini_model: str | None = None
+    grok_api_key: str | None = None
+    grok_model: str | None = None
     local_engine: str | None = None
     mode: str | None = None
 
 
 class TestKeyIn(BaseModel):
-    gemini_api_key: str | None = None
-    gemini_model: str | None = None
+    provider: str | None = None
+    api_key: str | None = None
+    model: str | None = None
 
 
 class RecognizeIn(BaseModel):
     job: str
     images: list[str] | None = None  # subset of names; None = all in the job
+    #: Cloud provider to use; defaults to whatever the saved mode selects.
+    provider: str | None = None
 
 
 class GridRow(BaseModel):
@@ -106,6 +111,8 @@ def post_settings(body: SettingsIn) -> dict:
     updated = settings_store.update(
         gemini_api_key=body.gemini_api_key,
         gemini_model=body.gemini_model,
+        grok_api_key=body.grok_api_key,
+        grok_model=body.grok_model,
         local_engine=body.local_engine,
         mode=body.mode,
     )
@@ -115,9 +122,12 @@ def post_settings(body: SettingsIn) -> dict:
 @app.post("/api/settings/test")
 def post_test_key(body: TestKeyIn) -> dict:
     settings = settings_store.load()
-    key = (body.gemini_api_key or "").strip() or settings.gemini_api_key
-    model = (body.gemini_model or "").strip() or settings.gemini_model
-    ok, message = recognizer.test_key(key, model)
+    provider = (body.provider or "gemini").strip()
+    if provider not in recognizer.PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider {provider!r}.")
+    key = (body.api_key or "").strip() or settings.key_for(provider)
+    model = (body.model or "").strip() or settings.model_for(provider)
+    ok, message = recognizer.test_key(key, model, provider=provider)
     return {"ok": ok, "message": message}
 
 
@@ -169,9 +179,18 @@ def recognize(body: RecognizeIn) -> JSONResponse:
         raise HTTPException(status_code=404, detail="Upload session not found. Re-upload the images.")
 
     settings = settings_store.load()
-    if not settings.has_key:
-        raise HTTPException(status_code=400, detail="No Gemini API key configured. Open Settings to add one.")
+    provider = (body.provider or settings.mode or "gemini").strip()
+    if provider not in recognizer.PROVIDERS:
+        provider = "gemini"
+    label = provider.capitalize()
+    if not settings.has_key_for(provider):
+        raise HTTPException(
+            status_code=400,
+            detail=f"No {label} API key configured. Open Settings to add one.",
+        )
 
+    api_key = settings.key_for(provider)
+    model = settings.model_for(provider)
     names = body.images or list(registry.keys())
     pages: list[tuple[str, list[dict]]] = []
     errors: list[dict] = []
@@ -179,7 +198,7 @@ def recognize(body: RecognizeIn) -> JSONResponse:
         path = registry.get(name)
         if path is None:
             continue
-        result = recognizer.recognise_page(path, settings.gemini_api_key, settings.gemini_model)
+        result = recognizer.recognise_page(path, api_key, model, provider=provider)
         if result.error:
             errors.append({"page": result.page, "error": result.error})
             continue

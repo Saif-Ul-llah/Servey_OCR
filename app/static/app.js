@@ -12,7 +12,11 @@ const state = {
   activeImage: null,
   rows: [],         // grid rows from the server (or blank manual rows)
   audit: null,
-  settings: { has_key: false, gemini_model: "gemini-2.0-flash", local_engine: "trocr_base", mode: "gemini" },
+  settings: {
+    has_key: false, has_gemini_key: false, has_grok_key: false,
+    gemini_model: "gemini-2.0-flash", grok_model: "grok-4-fast",
+    local_engine: "trocr_base", mode: "gemini",
+  },
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -65,18 +69,26 @@ el("theme-btn").addEventListener("click", () => {
 });
 
 /* ----------------------------------------------------------------- mode */
+const MODE_LABEL = { gemini: "Gemini", grok: "Grok", local: "Local OCR" };
+const isCloud = (mode) => mode === "gemini" || mode === "grok";
+function hasKeyFor(mode) {
+  return mode === "grok" ? state.settings.has_grok_key : state.settings.has_gemini_key;
+}
+
 function setMode(mode) {
   state.mode = mode;
-  const gemini = mode === "gemini";
-  el("mode-gemini").classList.toggle("is-active", gemini);
-  el("mode-manual").classList.toggle("is-active", !gemini);
-  el("mode-gemini").setAttribute("aria-selected", String(gemini));
-  el("mode-manual").setAttribute("aria-selected", String(!gemini));
-  // Both modes recognise from uploaded pages; only the engine differs.
-  el("recognize-label").textContent = gemini ? "Recognise with Gemini" : "Run local OCR";
+  [["gemini", "mode-gemini"], ["grok", "mode-grok"], ["local", "mode-manual"]].forEach(([key, id]) => {
+    const on = mode === key;
+    el(id).classList.toggle("is-active", on);
+    el(id).setAttribute("aria-selected", String(on));
+  });
+  // Every mode recognises from uploaded pages; only the recognizer differs.
+  el("recognize-label").textContent = isCloud(mode)
+    ? `Recognise with ${MODE_LABEL[mode]}`
+    : "Run local OCR";
   el("empty-title").textContent = "No rows yet";
-  el("empty-sub").textContent = gemini
-    ? "Upload page photos, then Recognise with Gemini. Review and correct, then export."
+  el("empty-sub").textContent = isCloud(mode)
+    ? `Upload page photos, then Recognise with ${MODE_LABEL[mode]}. Review and correct, then export.`
     : "Upload page photos, then Run local OCR (offline). Review and correct, then export.";
   updateRecognizeAvailability();
   settingsStoreMode(mode);
@@ -85,17 +97,17 @@ function settingsStoreMode(mode) {
   apiJSON("/api/settings", { mode }).catch(() => {});
 }
 el("mode-gemini").addEventListener("click", () => setMode("gemini"));
+el("mode-grok").addEventListener("click", () => setMode("grok"));
 el("mode-manual").addEventListener("click", () => setMode("local"));
 
 function updateRecognizeAvailability() {
   const btn = el("recognize-btn");
   const hasImages = state.job && state.images.length > 0;
-  const gemini = state.mode === "gemini";
-  const ready = hasImages && (!gemini || state.settings.has_key);
-  btn.disabled = !ready;
+  const needsKey = isCloud(state.mode) && !hasKeyFor(state.mode);
+  btn.disabled = !hasImages || needsKey;
   btn.title = !hasImages
     ? "Upload page photos first"
-    : (gemini && !state.settings.has_key ? "Add a Gemini API key in Settings first" : "");
+    : (needsKey ? `Add a ${MODE_LABEL[state.mode]} API key in Settings first` : "");
 }
 
 /* --------------------------------------------------------------- upload */
@@ -171,14 +183,18 @@ el("preview-close").addEventListener("click", () => {
 /* ------------------------------------------------------------- recognise */
 el("recognize-btn").addEventListener("click", () => {
   if (!state.job) return toast("warn", "Upload first", "Add page photos before recognising.");
-  return state.mode === "gemini" ? runGemini() : runLocal();
+  return isCloud(state.mode) ? runCloud(state.mode) : runLocal();
 });
 
-async function runGemini() {
-  if (!state.settings.has_key) { openSettings(); return toast("warn", "No API key", "Add a Gemini key in Settings."); }
-  showOverlay(`Recognising ${state.images.length} page${state.images.length > 1 ? "s" : ""} with Gemini…`);
+async function runCloud(provider) {
+  const label = MODE_LABEL[provider];
+  if (!hasKeyFor(provider)) {
+    openSettings(provider);
+    return toast("warn", "No API key", `Add a ${label} key in Settings.`);
+  }
+  showOverlay(`Recognising ${state.images.length} page${state.images.length > 1 ? "s" : ""} with ${label}…`);
   try {
-    const data = await apiJSON("/api/recognize", { job: state.job });
+    const data = await apiJSON("/api/recognize", { job: state.job, provider });
     applyResult(data);
     (data.recognition_errors || []).forEach((e) => toast("error", `Page ${e.page} failed`, e.error));
     toast("success", "Recognised", `${data.summary.row_count} rows read · ${data.summary.needs_review} need review.`);
@@ -397,17 +413,65 @@ function renderAudit(audit, summary) {
 
 /* ------------------------------------------------------------- settings */
 const modal = el("settings-modal");
-function openSettings() {
-  el("model-select").value = state.settings.gemini_model || "gemini-2.0-flash";
-  el("engine-select").value = state.settings.local_engine || "trocr_base";
+const PROVIDER_INFO = {
+  gemini: {
+    label: "Gemini",
+    link: "https://aistudio.google.com/app/apikey",
+    models: ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro"],
+  },
+  grok: {
+    label: "Grok (xAI)",
+    link: "https://console.x.ai/",
+    models: ["grok-4-fast", "grok-4", "grok-4-latest", "grok-3"],
+  },
+};
+//: Model text typed but not yet saved, kept per provider across tab switches.
+const draftModel = {};
+let settingsProvider = "gemini";
+
+function renderProviderTab() {
+  const info = PROVIDER_INFO[settingsProvider];
+  ["gemini", "grok"].forEach((key) => {
+    const on = key === settingsProvider;
+    el(`tab-${key}`).classList.toggle("is-active", on);
+    el(`tab-${key}`).setAttribute("aria-selected", String(on));
+  });
+  el("key-label").textContent = info.label;
+  el("key-link").href = info.link;
+  el("model-options").innerHTML = info.models
+    .map((m) => `<option value="${m}"></option>`).join("");
+  el("model-input").value =
+    draftModel[settingsProvider] ??
+    (settingsProvider === "grok"
+      ? state.settings.grok_model || "grok-4-fast"
+      : state.settings.gemini_model || "gemini-2.0-flash");
   el("api-key").value = "";
-  el("api-key").placeholder = state.settings.has_key ? "•••••••••• (saved — leave blank to keep)" : "Paste your API key";
+  el("api-key").type = "password";
+  el("api-key").placeholder = hasKeyFor(settingsProvider)
+    ? "•••••••••• (saved — leave blank to keep)"
+    : "Paste your API key";
   el("key-status").textContent = "";
   el("key-status").className = "key-status";
+}
+
+function openSettings(provider) {
+  settingsProvider = provider && PROVIDER_INFO[provider]
+    ? provider
+    : (state.mode === "grok" ? "grok" : "gemini");
+  Object.keys(draftModel).forEach((k) => delete draftModel[k]);
+  el("engine-select").value = state.settings.local_engine || "trocr_base";
+  renderProviderTab();
   modal.hidden = false;
 }
+["gemini", "grok"].forEach((key) => {
+  el(`tab-${key}`).addEventListener("click", () => {
+    draftModel[settingsProvider] = el("model-input").value;
+    settingsProvider = key;
+    renderProviderTab();
+  });
+});
 function closeSettings() { modal.hidden = true; }
-el("settings-btn").addEventListener("click", openSettings);
+el("settings-btn").addEventListener("click", () => openSettings());
 el("settings-close").addEventListener("click", closeSettings);
 el("settings-cancel").addEventListener("click", closeSettings);
 modal.addEventListener("click", (e) => { if (e.target === modal) closeSettings(); });
@@ -422,8 +486,9 @@ el("test-key-btn").addEventListener("click", async () => {
   status.className = "key-status"; status.textContent = "Testing…";
   try {
     const data = await apiJSON("/api/settings/test", {
-      gemini_api_key: el("api-key").value.trim(),
-      gemini_model: el("model-select").value,
+      provider: settingsProvider,
+      api_key: el("api-key").value.trim(),
+      model: el("model-input").value.trim(),
     });
     status.textContent = data.message;
     status.className = "key-status " + (data.ok ? "ok" : "err");
@@ -433,16 +498,20 @@ el("test-key-btn").addEventListener("click", async () => {
 });
 
 el("settings-save").addEventListener("click", async () => {
+  // Save the visible tab plus any model edited on the other one.
+  draftModel[settingsProvider] = el("model-input").value;
+  const payload = { local_engine: el("engine-select").value };
+  const key = el("api-key").value.trim();
+  if (settingsProvider === "grok") payload.grok_api_key = key;
+  else payload.gemini_api_key = key;
+  if (draftModel.gemini !== undefined) payload.gemini_model = draftModel.gemini.trim();
+  if (draftModel.grok !== undefined) payload.grok_model = draftModel.grok.trim();
+
   try {
-    const data = await apiJSON("/api/settings", {
-      gemini_api_key: el("api-key").value.trim(),
-      gemini_model: el("model-select").value,
-      local_engine: el("engine-select").value,
-    });
-    state.settings = data;
+    state.settings = await apiJSON("/api/settings", payload);
     updateRecognizeAvailability();
     closeSettings();
-    toast("success", "Settings saved", data.has_key ? "Gemini key stored." : "Settings updated.");
+    toast("success", "Settings saved", key ? `${PROVIDER_INFO[settingsProvider].label} key stored.` : "Settings updated.");
   } catch (err) {
     toast("error", "Could not save", err.message);
   }
@@ -455,10 +524,12 @@ async function init() {
   try {
     state.settings = await apiGet("/api/settings");
   } catch { /* server default is fine */ }
-  setMode(state.settings.mode || "gemini");
+  const mode = state.settings.mode || "gemini";
+  setMode(mode);
   renderGrid();
-  if (!state.settings.has_key && (state.settings.mode || "gemini") === "gemini") {
-    toast("warn", "Add a Gemini key", "Open Settings to enable AI recognition — or switch to Local OCR (offline).");
+  if (isCloud(mode) && !hasKeyFor(mode)) {
+    toast("warn", `Add a ${MODE_LABEL[mode]} key`,
+      "Open Settings to enable AI recognition — or switch to Local OCR (offline).");
   }
 }
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeSettings(); } });

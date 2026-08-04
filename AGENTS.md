@@ -36,9 +36,13 @@ Two layers, kept strictly separate:
 2. **`app/` — the desktop app.** A thin FastAPI layer that *drives* the core.
    Two recognition modes, same downstream flow
    (`upload → recognise → correct → review → export`):
-   - `recognizer.py` — **Gemini** (cloud) vision via REST → raw rows.
-   - `local_engine.py` — **Local OCR** (offline): `local_ocr.layout` segments the
-     page, `local_ocr.ocr` engine (TrOCR default) reads each cell → raw rows.
+   - `recognizer.py` — **cloud** vision via REST → raw rows. Gemini and Grok
+     share the prompt, JSON parsing and error handling; each provider is only a
+     request builder + response extractor in the `_PROVIDERS` table. Add a
+     provider there, not by copying the module.
+   - `local_engine.py` — **Local OCR** (offline): `local_ocr.layout.ruled`
+     segments the page, `local_ocr.ocr` engine (TrOCR-base) reads each cell.
+     Decoding is grammar-constrained (`local_ocr/ocr/constrained.py`).
    - `pipeline.py` — `process()` (correct + assemble → review grid + audit; also
      flags low-confidence cells) and `export()` (grid → workbook, verbatim). The
      **only** place the app reaches into `local_ocr`.
@@ -49,7 +53,16 @@ Two layers, kept strictly separate:
 **Rule: the app never re-implements core logic.** New correction or assembly
 behaviour goes in `local_ocr/` with tests, not in `app/`.
 
-## The recognizer is Gemini (cloud) — do not propose a local VLM
+## Segmentation and constrained decoding are measured, not guessed
+
+`scripts/eval_segmentation.py` scores the segmenters against the manifest's known
+row counts and page sides. Change a threshold in `local_ocr/layout/ruled.py` only
+alongside a run of that script, and **look at the crops** (render them; blank or
+half-cut crops are invisible in an accuracy number and were the actual bug that
+made local OCR unusable). Constants there were fitted at 960x1280 and need a
+re-check on full-resolution originals.
+
+## The default recognizer is cloud — do not propose a local VLM
 
 This machine (8 GB RAM, integrated GPU) cannot run a 3B vision model — it
 reserves ~10 GB at runtime and thrashes. The Ollama/qwen experiment was removed

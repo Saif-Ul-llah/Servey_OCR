@@ -70,6 +70,9 @@ class PageGeometry:
     rows: list[tuple[int, int]] = field(default_factory=list)
     #: (left, right) of each column, target-page relative.
     columns: list[tuple[int, int]] = field(default_factory=list)
+    #: Printed ruled lines found on the target page. Zero for the ink-band
+    #: segmenter, which does not look for them; the rule-anchored one sets it.
+    detected_rules: int = 0
 
 
 def ink_mask(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

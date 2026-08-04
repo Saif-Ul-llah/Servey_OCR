@@ -146,12 +146,16 @@ class TrOCREngine(Engine):
     logits processor is a Phase 2 improvement.
     """
 
-    def __init__(self, checkpoint: str = "microsoft/trocr-small-handwritten"):
+    def __init__(self, checkpoint: str = "microsoft/trocr-small-handwritten", constrain: bool = True):
         super().__init__()
         self.checkpoint = checkpoint
         self.name = f"trocr:{checkpoint.rsplit('/', 1)[-1]}"
+        #: Restrict decoding to the field's grammar. Off only for benchmarking
+        #: how much the constraint is worth.
+        self.constrain = constrain
         self._processor = None
         self._model = None
+        self._constraints: dict[Field, object] = {}
 
     def _load(self) -> None:
         try:
@@ -172,11 +176,29 @@ class TrOCREngine(Engine):
         self._model.eval()
         torch.set_num_threads(max(1, (torch.get_num_threads() or 4)))
 
+    def _constraint(self, field: Field):
+        """Cached grammar processor for `field`; None when unconstrained."""
+        if not self.constrain:
+            return None
+        if field not in self._constraints:
+            from local_ocr.ocr.constrained import build_processor
+
+            tokenizer = self._processor.tokenizer
+            self._constraints[field] = build_processor(
+                tokenizer,
+                field,
+                vocab_size=int(self._model.config.decoder.vocab_size),
+                eos_token_id=int(tokenizer.eos_token_id or 2),
+                torch=self._torch,
+            )
+        return self._constraints[field]
+
     def _recognise(self, image: np.ndarray, field: Field) -> Recognition:
         if self._model is None:
             return Recognition(text="", confidence=0.0, engine=self.name)
 
         pixel_values = self._processor(images=_to_rgb(image), return_tensors="pt").pixel_values
+        processor = self._constraint(field)
         with self._torch.no_grad():
             generated = self._model.generate(
                 pixel_values,
@@ -184,6 +206,7 @@ class TrOCREngine(Engine):
                 num_beams=4,
                 output_scores=True,
                 return_dict_in_generate=True,
+                logits_processor=[processor] if processor is not None else None,
             )
         text = self._processor.batch_decode(generated.sequences, skip_special_tokens=True)[0]
 

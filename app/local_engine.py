@@ -22,7 +22,8 @@ from pathlib import Path
 
 import cv2
 
-from local_ocr.layout.bootstrap import analyse, crop
+from local_ocr.layout.bootstrap import crop
+from local_ocr.layout.ruled import segment
 from local_ocr.ocr.base import Engine, Field
 from local_ocr.ocr.engines import REGISTRY, build
 
@@ -61,7 +62,7 @@ def recognise_page_local(path: Path | str, engine: Engine) -> LocalResult:
     if image is None:
         return LocalResult(page=page, error="could not read image")
 
-    geometry = analyse(image)
+    geometry = segment(image)
     if geometry is None:
         return LocalResult(page=page, error="no notebook page detected")
     if len(geometry.columns) < len(_COLUMN_FIELDS):

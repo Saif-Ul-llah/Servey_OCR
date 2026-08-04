@@ -21,35 +21,58 @@ SETTINGS_PATH = APP_SETTINGS_PATH
 #: reads this block hand well; the user can change it in the settings panel.
 DEFAULT_MODEL = "gemini-2.0-flash"
 
+#: xAI Grok vision model. Verified against the live API: the older
+#: ``grok-2-vision-*`` and ``grok-beta`` names are retired and now 404, while
+#: ``grok-4*`` and ``grok-3`` resolve. Names change often, so the UI takes a
+#: free-text value with suggestions rather than a closed dropdown, and the
+#: Test button confirms the name against the account actually being used.
+DEFAULT_GROK_MODEL = "grok-4-fast"
+
 #: Local (offline) OCR engine used when mode == "local". TrOCR is the only real
 #: handwriting model in the registry. Default is the *base* checkpoint: the
 #: *small* one ships a SentencePiece tokenizer that transformers 5.x cannot load
 #: on this Python 3.14 stack, whereas base's BPE tokenizer loads fine.
 DEFAULT_LOCAL_ENGINE = "trocr_base"
 
-#: "gemini" -> cloud recognition; "local" -> offline OCR engine + rules.
-VALID_MODES = ("gemini", "local")
+#: "gemini"/"grok" -> cloud recognition; "local" -> offline OCR engine + rules.
+VALID_MODES = ("gemini", "grok", "local")
 
 
 @dataclass
 class AppSettings:
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_MODEL
+    grok_api_key: str = ""
+    grok_model: str = DEFAULT_GROK_MODEL
     local_engine: str = DEFAULT_LOCAL_ENGINE
     mode: str = "gemini"
 
     @property
     def has_key(self) -> bool:
-        return bool(self.gemini_api_key.strip())
+        """Whether the *currently selected* cloud provider has a key."""
+        return self.has_key_for(self.mode if self.mode in ("gemini", "grok") else "gemini")
+
+    def has_key_for(self, provider: str) -> bool:
+        return bool(self.key_for(provider).strip())
+
+    def key_for(self, provider: str) -> str:
+        return self.grok_api_key if provider == "grok" else self.gemini_api_key
+
+    def model_for(self, provider: str) -> str:
+        return self.grok_model if provider == "grok" else self.gemini_model
 
     def public(self) -> dict:
-        """Safe-to-serialise view: never leak the key itself to the frontend."""
+        """Safe-to-serialise view: never leak the keys themselves to the frontend."""
         return {
             "gemini_model": self.gemini_model,
+            "grok_model": self.grok_model,
             "local_engine": self.local_engine,
             "mode": self.mode,
             "has_key": self.has_key,
+            "has_gemini_key": self.has_key_for("gemini"),
+            "has_grok_key": self.has_key_for("grok"),
             "default_model": DEFAULT_MODEL,
+            "default_grok_model": DEFAULT_GROK_MODEL,
         }
 
 
@@ -69,13 +92,21 @@ def load() -> AppSettings:
     settings = AppSettings(
         gemini_api_key=str(data.get("gemini_api_key", "") or ""),
         gemini_model=str(data.get("gemini_model") or DEFAULT_MODEL),
+        grok_api_key=str(data.get("grok_api_key", "") or ""),
+        grok_model=str(data.get("grok_model") or DEFAULT_GROK_MODEL),
         local_engine=str(data.get("local_engine") or DEFAULT_LOCAL_ENGINE),
         mode=str(data.get("mode") or "gemini"),
     )
-    if not settings.has_key:
-        env_key = os.environ.get("GEMINI_API_KEY", "").strip()
-        if env_key:
-            settings.gemini_api_key = env_key
+    # The environment fills a blank key only, so a key typed into the UI is
+    # never shadowed by a stale shell variable.
+    for attribute, variable in (
+        ("gemini_api_key", "GEMINI_API_KEY"),
+        ("grok_api_key", "XAI_API_KEY"),
+    ):
+        if not getattr(settings, attribute).strip():
+            env_key = os.environ.get(variable, "").strip()
+            if env_key:
+                setattr(settings, attribute, env_key)
     if settings.mode == "manual":  # legacy value -> the offline OCR mode
         settings.mode = "local"
     if settings.mode not in VALID_MODES:
@@ -94,6 +125,8 @@ def update(
     *,
     gemini_api_key: str | None = None,
     gemini_model: str | None = None,
+    grok_api_key: str | None = None,
+    grok_model: str | None = None,
     local_engine: str | None = None,
     mode: str | None = None,
 ) -> AppSettings:
@@ -108,6 +141,10 @@ def update(
         settings.gemini_api_key = gemini_api_key.strip()
     if gemini_model is not None and gemini_model.strip():
         settings.gemini_model = gemini_model.strip()
+    if grok_api_key is not None and grok_api_key.strip():
+        settings.grok_api_key = grok_api_key.strip()
+    if grok_model is not None and grok_model.strip():
+        settings.grok_model = grok_model.strip()
     if local_engine is not None and local_engine.strip():
         settings.local_engine = local_engine.strip()
     if mode is not None and mode in VALID_MODES:
