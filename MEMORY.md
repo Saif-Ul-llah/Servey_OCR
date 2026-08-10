@@ -19,12 +19,46 @@ code alone. Newest context at the top of each section.
 - Because names churn, both providers' model fields are **free text with
   suggestions**, not closed dropdowns, and Settings has a Test button.
 
-## Three recognition modes, one flow
+## Agent-CLI modes: cheapest accurate path, and the flags that make it cheap
 
-- The app has **three modes** sharing the flow
+- **Claude Code / Codex modes** (`app/agent_cli.py`, Aug 2026) drive a CLI
+  already installed and signed in on the machine. No API key — recognition bills
+  the user's own subscription. Verified end to end for Claude Code; **Codex is
+  written to its documented interface but never run** (the CLI was not installed
+  here), which is why its output parser scans for text and falls back to raw
+  stdout instead of matching one event name.
+- **Most accurate mode measured so far.** `claude-opus-5` on page_08: 22/22 meter
+  codes exact after correction, 0 cells flagged, vs EasyOCR's 3/7. page_10:
+  24/25. Raw output often contains literal ditto marks (`" 38123`) and the
+  occasional bad prefix — correction's ditto expansion and whitelist repair fix
+  both, so judge this mode *after* the pipeline, never on raw rows.
+- **It can still be confidently wrong**, and that is the dangerous case: page_10
+  gave `SFG04433` for `SEG04433`. `SFG` is a whitelisted prefix, so nothing
+  flagged it. No recognizer here is exempt; this is what the survey-gap and
+  duplicate-meter audits are for.
+- **`--safe-mode` is a ~6× cost lever, not a nicety.** Without it the CLI
+  discovers this repo's own `AGENTS.md`/`CLAUDE.md` and ships it in every page's
+  prompt: $0.44/page became $0.04–0.07/page with `--safe-mode` plus
+  `--exclude-dynamic-system-prompt-sections` (identical cached prefix across
+  pages) and cwd set to the image's folder.
+- **Prompt must go on stdin.** Windows caps a command line at ~8 KB; `claude -p
+  "<prompt>"` also silently produced an empty prompt under Git Bash command
+  substitution. Read the flags from `--help` before trusting any of this — the
+  useful ones here (`--tools`, `--allowedTools`, `--safe-mode`,
+  `--no-session-persistence`, `--output-format json`) are easy to guess wrong.
+- **`shutil.which` returned `claude.EXE`** on this machine, which
+  `subprocess.run` executes directly. An npm-installed CLI (likely for `codex`)
+  lands as a `.cmd` shim, which `CreateProcess` **cannot** run — those must go
+  through `cmd.exe /c`.
+
+## Five recognition modes, one flow
+
+- The app has **five modes** sharing the flow
   `upload → recognise → correction → review/edit → export`:
-  - **Gemini** (default) and **Grok** — cloud, both in `app/recognizer.py`
-    behind one provider table; each has its own key + model.
+  - **Gemini** and **Grok** — cloud, both in `app/recognizer.py` behind one
+    provider table; each has its own key + model.
+  - **Claude Code** and **Codex** — a local agent CLI, `app/agent_cli.py`
+    (see above). No key; availability is "is the command on PATH".
   - **Local OCR** (offline) — `app/local_engine.py`: the `local_ocr.layout`
     segmenter crops cells, a `local_ocr.ocr` engine (**TrOCR-base** default)
     reads them. Chosen in Settings. "Manual typing" is NOT the offline mode —
@@ -118,8 +152,9 @@ counts. `local_ocr/layout/ruled.py` supersedes `bootstrap.py` for local OCR.
 
 ## Two .exe builds
 
-- `ServeyOCR.spec` -> lean (~45 MB), cloud modes only.
-- `ServeyOCR-Offline.spec` -> ~1-2 GB, bundles OpenCV + torch + EasyOCR
+- `ServeyOCR.spec` -> lean (~55 MB), cloud + agent-CLI modes (the latter need
+  nothing bundled — they shell out to a CLI on the machine).
+- `ServeyOCR-Offline.spec` -> ~395 MB, bundles OpenCV + torch + EasyOCR
   **and EasyOCR's weights** from `~/.EasyOCR/model` (an "offline" app that
   downloads 94 MB on first use is not offline). Needs `collect_all` for those
   packages — following imports alone leaves the frozen build broken at runtime.

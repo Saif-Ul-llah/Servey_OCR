@@ -16,14 +16,20 @@ uvicorn>=0.29
 python-multipart>=0.0.9   # file uploads
 requests>=2.31            # Gemini REST calls
 
+# --- Claude Code / Codex modes: nothing to install here ---
+# These shell out to the `claude` / `codex` CLI already on the machine (stdlib
+# subprocess only). Install and sign in to whichever you want, outside Python.
+
 # --- Local OCR (offline) mode: install an engine to enable it ---
-# TrOCR-base (recommended — the real handwriting model). CPU wheels:
+# EasyOCR is the default, chosen by measurement: this hand is neat block capitals
+# and digits, so a scene-text model beats TrOCR on both accuracy and speed
+# (page_08: 3/7 vs 0/7 exact codes, 0.65s vs ~4s per cell).
+# easyocr>=1.7
+# Alternatives (slower here; TrOCR is the only true handwriting model):
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-#   pip install transformers
+#   pip install transformers        # TrOCR-base
 # Note: trocr_small ships a SentencePiece tokenizer that transformers 5.x cannot
 # load on Python 3.14; use trocr_base (BPE tokenizer, loads fine).
-# Lighter, scene-text alternatives (weaker on handwriting):
-# easyocr>=1.7
 # paddleocr>=2.7  paddlepaddle>=2.6
 
 # --- dev ---

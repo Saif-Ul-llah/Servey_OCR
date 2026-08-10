@@ -29,8 +29,11 @@ local OCR stack is most of the weight:
 
 | Executable | Size | Modes | Needs |
 |---|---|---|---|
-| `dist\ServeyOCR.exe` | ~45 MB | Gemini, Grok | an API key + internet |
-| `dist\ServeyOCR-Offline.exe` | ~1–2 GB | **all three**, incl. Local OCR | nothing — fully offline |
+| `dist\ServeyOCR.exe` | ~55 MB | Gemini, Grok, Claude Code, Codex | an API key, or an agent CLI installed |
+| `dist\ServeyOCR-Offline.exe` | ~400 MB | **all five**, incl. Local OCR | nothing — fully offline |
+
+The Claude Code and Codex modes work in either build: they shell out to a CLI on
+the machine, so they need nothing bundled.
 
 The offline build bundles OpenCV, PyTorch and EasyOCR *with its weights*, so it
 never downloads anything on first run. It starts more slowly (it unpacks itself)
@@ -56,7 +59,7 @@ python -m PyInstaller ServeyOCR-Offline.spec --noconfirm    # offline
 
 ## How it works
 
-Three recognition modes, chosen with the toggle in the top bar. **All follow the
+Five recognition modes, chosen with the toggle in the top bar. **All follow the
 same flow** — `upload images → recognise → correction → review/edit → export` —
 and differ only in *which* recognizer reads the pages:
 
@@ -65,14 +68,53 @@ and differ only in *which* recognizer reads the pages:
 | **Local OCR** *(default)* | The local segmenter crops each cell and a local engine (EasyOCR) reads it — no cloud. | engine installed (see below); fully offline |
 | **Gemini** | Google Gemini reads each page (layout + handwriting together) into raw rows. | API key + internet |
 | **Grok** | xAI Grok, same job via an OpenAI-compatible vision endpoint. | API key + internet |
+| **Claude Code** | Runs the `claude` CLI already on this machine and has it read each page. | the CLI installed + signed in; **no API key** |
+| **Codex** | Same, via the `codex` CLI. | the CLI installed + signed in; **no API key** |
 
 Local OCR is the default because it works with no API key and no network. The
-cloud modes are more accurate on these images; switch with the top-bar toggle
-once you have pasted a key into Settings.
+other four are more accurate on these images; switch with the top-bar toggle.
+A mode this machine cannot run is greyed out with the reason, so you never
+upload pages only to hit a failure.
 
 Each cloud provider keeps its own key and model in Settings, and **Test key**
 confirms both against the live API before you rely on them. Model names are
 free-text with suggestions, because providers rename models often.
+
+### Claude Code / Codex modes (no API key)
+
+These drive a coding-agent CLI you already have installed and signed in, so
+recognition runs on your existing subscription instead of an API key stored in
+this app. Nothing is saved here but the model name. Settings → **Test CLI**
+confirms the command is found, signed in, and accepts the model name.
+
+Measured on the sample pages with `claude-opus-5`, this is **the most accurate
+mode** — and it is the only one whose per-page cost lands on your own account:
+
+| | Claude Code | Local OCR (EasyOCR) |
+|---|---|---|
+| Meter codes exactly right, page_08 | **22 / 22** | 3 / 7 |
+| Meter codes exactly right, page_10 | **24 / 25** | — |
+| Cells flagged for review | 0 | most |
+| Time | ~13–30 s/page | ~20 s/page |
+| Cost | ~$0.04–0.07/page | free |
+
+The app pins the CLI down so a batch is cheap, quiet and side-effect free: only
+the file-reading tool is enabled, project customisations (`CLAUDE.md`, hooks,
+plugins) are disabled, and no session is written to disk. Leaving those on cost
+~6× more per page and let an unrelated project's instructions steer the
+transcription.
+
+Two honest caveats:
+
+- **It can be confidently wrong.** On page_10 one code came back `SFG04433`
+  instead of `SEG04433`. `SFG` is a real prefix, so nothing flagged it — the same
+  exposure every recognizer here has, and why the survey-number and
+  duplicate-meter audits exist. Spot-check the grid.
+- **Codex is implemented but untested.** The `codex` CLI was not installed on the
+  machine this was built on, so its argv and output parsing follow the documented
+  interface rather than an observed run (the output parser is deliberately
+  forgiving as a result). Claude Code was verified end to end. If Codex
+  misbehaves, that is the first place to look.
 
 Whichever mode you use, every value then flows through one deterministic core:
 
@@ -94,7 +136,7 @@ code is a number).
 
 Runs with no cloud: `local_ocr/layout` segments the page, `local_ocr/ocr` reads
 each cell, then the same correction/assembly/audit runs. Install an engine into
-the Python environment first (TrOCR is the only true handwriting model):
+the Python environment first:
 
 ```bash
 python -m pip install easyocr             # the default engine
@@ -152,11 +194,11 @@ Caveats, stated plainly:
   grid is where you catch its mistakes; low-confidence cells are flagged.
 - **Not in the lean `.exe`** — use `ServeyOCR-Offline.exe` or `python run_app.py`.
 
-**Why a cloud model is the default:** a local 3B *vision* model reserves ~10 GB
-at runtime and this 8 GB machine can't hold it. Gemini and Grok read the whole
-page in one call and need no local segmentation at all. Local OCR engines
-(TrOCR/EasyOCR/Paddle) are far lighter and do run here, just slower and gated by
-segmentation quality.
+**Why a hosted model beats a local one here:** a local 3B *vision* model reserves
+~10 GB at runtime and this 8 GB machine can't hold it. Gemini, Grok and the agent
+CLIs read the whole page in one call and need no local segmentation at all. Local
+OCR engines (TrOCR/EasyOCR/Paddle) are far lighter and do run here, just slower
+and gated by segmentation quality.
 
 ---
 
@@ -187,10 +229,12 @@ Facts enforced in code that would otherwise be guesswork:
 
 ```
 app/               desktop app
-  recognizer.py    Google Gemini cloud recognition (REST)
+  recognizer.py    cloud recognition via REST (Gemini, Grok)
+  agent_cli.py     recognition by driving a local agent CLI (Claude Code, Codex)
+  local_engine.py  offline recognition via the local segmenter + OCR engine
   pipeline.py      drives correction -> assembly -> export from UI rows
   server.py        FastAPI JSON API + serves the UI
-  settings_store.py persisted Gemini key / model / mode
+  settings_store.py persisted keys / models / mode
   static/          index.html, styles.css, app.js (single-page UI)
 local_ocr/         deterministic core (no cloud, no UI)
   correction/      grammar, whitelist repair, repeat marks, placeholders, remarks
@@ -210,7 +254,7 @@ tests/             unit + integration    AGENTS.md         guide for contributor
 ## Development
 
 ```bash
-python -m pytest tests            # 154 tests
+python -m pytest tests            # 184 tests
 ```
 
 `tests/integration/test_export_golden.py` runs correction, assembly and export

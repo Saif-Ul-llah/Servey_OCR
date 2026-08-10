@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import local_engine, pipeline, recognizer, settings_store
+from app import agent_cli, local_engine, pipeline, recognizer, settings_store
 from local_ocr import paths
 
 STATIC_DIR = paths.STATIC_DIR
@@ -43,6 +43,8 @@ class SettingsIn(BaseModel):
     grok_api_key: str | None = None
     grok_model: str | None = None
     local_engine: str | None = None
+    claudecode_model: str | None = None
+    codex_model: str | None = None
     mode: str | None = None
 
 
@@ -102,11 +104,24 @@ def _pages_from_rows(rows: list[GridRow]) -> list[tuple[str, list[dict]]]:
 
 
 def _settings_payload(settings) -> dict:
-    """Public settings plus whether local OCR can actually run in this build."""
+    """Public settings plus which modes can actually run on this machine.
+
+    Both offline OCR and the agent CLIs depend on things outside the app --
+    bundled imaging libraries, an installed and signed-in CLI -- so the UI is
+    told up front rather than discovering it on the first click.
+    """
     payload = settings.public()
     ok, reason = local_engine.availability(settings.local_engine)
     payload["local_available"] = ok
     payload["local_unavailable_reason"] = reason
+    payload["agents"] = {
+        provider: dict(
+            zip(("available", "reason"), agent_cli.availability(provider)),
+            label=agent_cli.label_for(provider),
+            models=agent_cli.models_for(provider),
+        )
+        for provider in agent_cli.known_providers()
+    }
     return payload
 
 
@@ -123,6 +138,8 @@ def post_settings(body: SettingsIn) -> dict:
         grok_api_key=body.grok_api_key,
         grok_model=body.grok_model,
         local_engine=body.local_engine,
+        claudecode_model=body.claudecode_model,
+        codex_model=body.codex_model,
         mode=body.mode,
     )
     return _settings_payload(updated)
@@ -132,6 +149,12 @@ def post_settings(body: SettingsIn) -> dict:
 def post_test_key(body: TestKeyIn) -> dict:
     settings = settings_store.load()
     provider = (body.provider or "gemini").strip()
+    # An agent CLI has no key to check -- the equivalent test is that the
+    # command exists, is signed in, and accepts the model name.
+    if provider in agent_cli.PROVIDERS:
+        model = body.model if body.model is not None else settings.model_for(provider)
+        ok, message = agent_cli.test_agent(provider, model or "")
+        return {"ok": ok, "message": message}
     if provider not in recognizer.PROVIDERS:
         raise HTTPException(status_code=400, detail=f"Unknown provider {provider!r}.")
     key = (body.api_key or "").strip() or settings.key_for(provider)
@@ -271,6 +294,59 @@ def recognize_local(body: RecognizeIn) -> JSONResponse:
 
     payload = pipeline.process(pages)
     payload["recognition_errors"] = errors
+    return JSONResponse(payload)
+
+
+@app.post("/api/recognize_agent")
+def recognize_agent(body: RecognizeIn) -> JSONResponse:
+    """Recognise with a coding-agent CLI installed on this machine.
+
+    Separate from ``/api/recognize`` because the failure modes are different:
+    there is no key to be missing, but the command can be absent, not signed in,
+    or simply slow -- and the answer arrives on stdout rather than over HTTP.
+    """
+    registry = _JOBS.get(body.job)
+    if not registry:
+        raise HTTPException(status_code=404, detail="Upload session not found. Re-upload the images.")
+
+    settings = settings_store.load()
+    provider = (body.provider or settings.mode or "claudecode").strip()
+    if provider not in agent_cli.PROVIDERS:
+        raise HTTPException(status_code=400, detail=f"Unknown agent provider {provider!r}.")
+    available, reason = agent_cli.availability(provider)
+    if not available:
+        raise HTTPException(status_code=400, detail=reason)
+
+    model = settings.model_for(provider)
+    names = body.images or list(registry.keys())
+    pages: list[tuple[str, list[dict]]] = []
+    errors: list[dict] = []
+    cost = 0.0
+    for name in names:
+        path = registry.get(name)
+        if path is None:
+            continue
+        result = agent_cli.recognise_page_agent(path, provider=provider, model=model)
+        if result.error:
+            errors.append({"page": result.page, "error": result.error})
+            continue
+        if result.cost_usd:
+            cost += result.cost_usd
+        pages.append(
+            (
+                result.page,
+                [{"survey": r.survey, "meter": r.meter, "remarks": r.remarks} for r in result.rows],
+            )
+        )
+
+    if not pages and errors:
+        raise HTTPException(status_code=502, detail=errors[0]["error"])
+
+    payload = pipeline.process(pages)
+    payload["recognition_errors"] = errors
+    # This transport bills the user's own account per page, so say what it cost
+    # rather than leaving them to find out on a statement.
+    payload["cost_usd"] = round(cost, 4) if cost else None
     return JSONResponse(payload)
 
 

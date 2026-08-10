@@ -16,6 +16,8 @@ const state = {
     has_key: false, has_gemini_key: false, has_grok_key: false,
     gemini_model: "gemini-2.0-flash", grok_model: "grok-4-fast",
     local_engine: "easyocr", mode: "local",
+    claudecode_model: "claude-opus-5", codex_model: "",
+    agents: {},  // provider -> {available, reason, label, models}
   },
 };
 
@@ -69,65 +71,90 @@ el("theme-btn").addEventListener("click", () => {
 });
 
 /* ----------------------------------------------------------------- mode */
-const MODE_LABEL = { gemini: "Gemini", grok: "Grok", local: "Local OCR" };
+const MODE_LABEL = {
+  gemini: "Gemini", grok: "Grok", local: "Local OCR",
+  claudecode: "Claude Code", codex: "Codex",
+};
+//: mode -> the button that selects it. Also the list setMode walks.
+const MODE_BUTTON = {
+  gemini: "mode-gemini", grok: "mode-grok",
+  claudecode: "mode-claudecode", codex: "mode-codex", local: "mode-manual",
+};
 const isCloud = (mode) => mode === "gemini" || mode === "grok";
+//: Modes driven by a CLI on this machine rather than our own API key.
+const isAgent = (mode) => mode === "claudecode" || mode === "codex";
 function hasKeyFor(mode) {
   return mode === "grok" ? state.settings.has_grok_key : state.settings.has_gemini_key;
+}
+function agentInfo(mode) {
+  return (state.settings.agents || {})[mode] || {};
+}
+//: Why a mode cannot run here, or "" when it can. One helper so the button
+//: dimming, the disabled Recognise button and the banner never disagree.
+function modeBlockedReason(mode) {
+  if (isAgent(mode)) {
+    const info = agentInfo(mode);
+    return info.available === false ? (info.reason || `${MODE_LABEL[mode]} is not available`) : "";
+  }
+  if (mode === "local" && state.settings.local_available === false) {
+    return state.settings.local_unavailable_reason || "Local OCR is unavailable in this build";
+  }
+  return "";
+}
+
+function refreshModeButtons() {
+  Object.entries(MODE_BUTTON).forEach(([key, id]) => {
+    const button = el(id);
+    const on = state.mode === key;
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-selected", String(on));
+    // Dim a mode this machine cannot run, so it reads as unavailable before it
+    // is clicked rather than only after.
+    const blocked = modeBlockedReason(key);
+    button.style.opacity = blocked ? "0.45" : "";
+    button.title = blocked;
+  });
+  updateRecognizeAvailability();
 }
 
 function setMode(mode) {
   state.mode = mode;
-  [["gemini", "mode-gemini"], ["grok", "mode-grok"], ["local", "mode-manual"]].forEach(([key, id]) => {
-    const on = mode === key;
-    el(id).classList.toggle("is-active", on);
-    el(id).setAttribute("aria-selected", String(on));
-  });
+  refreshModeButtons();
   // Every mode recognises from uploaded pages; only the recognizer differs.
-  el("recognize-label").textContent = isCloud(mode)
-    ? `Recognise with ${MODE_LABEL[mode]}`
-    : "Run local OCR";
+  el("recognize-label").textContent = mode === "local"
+    ? "Run local OCR"
+    : `Recognise with ${MODE_LABEL[mode]}`;
   el("empty-title").textContent = "No rows yet";
-  el("empty-sub").textContent = isCloud(mode)
-    ? `Upload page photos, then Recognise with ${MODE_LABEL[mode]}. Review and correct, then export.`
-    : "Upload page photos, then Run local OCR (offline). Review and correct, then export.";
-  // Dim a mode this build cannot run, so it reads as unavailable before it is
-  // clicked rather than only after.
-  const localBtn = el("mode-manual");
-  const localOff = state.settings.local_available === false;
-  localBtn.style.opacity = localOff ? "0.45" : "";
-  localBtn.title = localOff ? (state.settings.local_unavailable_reason || "") : "";
-
-  updateRecognizeAvailability();
+  el("empty-sub").textContent = mode === "local"
+    ? "Upload page photos, then Run local OCR (offline). Review and correct, then export."
+    : `Upload page photos, then Recognise with ${MODE_LABEL[mode]}. Review and correct, then export.`;
   settingsStoreMode(mode);
 }
 function settingsStoreMode(mode) {
   apiJSON("/api/settings", { mode }).catch(() => {});
 }
-el("mode-gemini").addEventListener("click", () => setMode("gemini"));
-el("mode-grok").addEventListener("click", () => setMode("grok"));
-el("mode-manual").addEventListener("click", () => setMode("local"));
+Object.entries(MODE_BUTTON).forEach(([key, id]) => {
+  el(id).addEventListener("click", () => setMode(key));
+});
 
 function updateRecognizeAvailability() {
   const btn = el("recognize-btn");
   const hasImages = state.job && state.images.length > 0;
   const needsKey = isCloud(state.mode) && !hasKeyFor(state.mode);
-  // Local OCR is absent from the standalone .exe; say so up front rather than
-  // letting the user upload, press the button and wait for a failure.
-  const localBlocked = state.mode === "local" && state.settings.local_available === false;
-  btn.disabled = !hasImages || needsKey || localBlocked;
-  btn.title = localBlocked
-    ? (state.settings.local_unavailable_reason || "Local OCR is unavailable in this build")
+  // Local OCR is absent from the lean .exe and an agent CLI may not be
+  // installed; say so up front rather than letting the user upload, press the
+  // button and wait for a failure.
+  const blocked = modeBlockedReason(state.mode);
+  btn.disabled = !hasImages || needsKey || Boolean(blocked);
+  btn.title = blocked
+    ? blocked
     : !hasImages
       ? "Upload page photos first"
       : (needsKey ? `Add a ${MODE_LABEL[state.mode]} API key in Settings first` : "");
 
   const note = el("mode-note");
-  if (localBlocked) {
-    note.textContent = state.settings.local_unavailable_reason || "";
-    note.hidden = false;
-  } else {
-    note.hidden = true;
-  }
+  note.textContent = blocked;
+  note.hidden = !blocked;
 }
 
 /* --------------------------------------------------------------- upload */
@@ -203,7 +230,9 @@ el("preview-close").addEventListener("click", () => {
 /* ------------------------------------------------------------- recognise */
 el("recognize-btn").addEventListener("click", () => {
   if (!state.job) return toast("warn", "Upload first", "Add page photos before recognising.");
-  return isCloud(state.mode) ? runCloud(state.mode) : runLocal();
+  if (isCloud(state.mode)) return runCloud(state.mode);
+  if (isAgent(state.mode)) return runAgent(state.mode);
+  return runLocal();
 });
 
 async function runCloud(provider) {
@@ -220,6 +249,26 @@ async function runCloud(provider) {
     toast("success", "Recognised", `${data.summary.row_count} rows read · ${data.summary.needs_review} need review.`);
   } catch (err) {
     toast("error", "Recognition failed", err.message);
+  } finally {
+    hideOverlay();
+  }
+}
+
+async function runAgent(provider) {
+  const label = MODE_LABEL[provider];
+  const blocked = modeBlockedReason(provider);
+  if (blocked) return toast("error", `${label} unavailable`, blocked);
+  const n = state.images.length;
+  showOverlay(`Recognising ${n} page${n > 1 ? "s" : ""} with ${label}… it reads each page in turn, so this takes a little while.`);
+  try {
+    const data = await apiJSON("/api/recognize_agent", { job: state.job, provider });
+    applyResult(data);
+    (data.recognition_errors || []).forEach((e) => toast("error", `Page ${e.page} failed`, e.error));
+    // The CLI bills the user's own account, so report the spend it reported.
+    const cost = data.cost_usd ? ` · $${data.cost_usd.toFixed(2)}` : "";
+    toast("success", "Recognised", `${data.summary.row_count} rows read · ${data.summary.needs_review} need review${cost}.`);
+  } catch (err) {
+    toast("error", `${label} failed`, err.message);
   } finally {
     hideOverlay();
   }
@@ -444,32 +493,74 @@ const PROVIDER_INFO = {
     link: "https://console.x.ai/",
     models: ["grok-4-fast", "grok-4", "grok-4-latest", "grok-3"],
   },
+  claudecode: {
+    label: "Claude Code",
+    agent: true,
+    exe: "claude",
+    models: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+  },
+  codex: {
+    label: "Codex",
+    agent: true,
+    exe: "codex",
+    models: ["gpt-5-codex", "gpt-5", "o4-mini"],
+  },
 };
+const PROVIDER_TABS = ["gemini", "grok", "claudecode", "codex"];
 //: Model text typed but not yet saved, kept per provider across tab switches.
 const draftModel = {};
 let settingsProvider = "gemini";
 
+function savedModelFor(provider) {
+  const fallback = { gemini: "gemini-2.0-flash", grok: "grok-4-fast", claudecode: "claude-opus-5", codex: "" };
+  const saved = state.settings[`${provider}_model`];
+  // "" is a real value for the agents ("let the CLI choose"), so only fall back
+  // when the setting is genuinely absent.
+  return saved === undefined || saved === null ? fallback[provider] : saved;
+}
+
 function renderProviderTab() {
   const info = PROVIDER_INFO[settingsProvider];
-  ["gemini", "grok"].forEach((key) => {
+  const agent = Boolean(info.agent);
+  PROVIDER_TABS.forEach((key) => {
     const on = key === settingsProvider;
     el(`tab-${key}`).classList.toggle("is-active", on);
     el(`tab-${key}`).setAttribute("aria-selected", String(on));
   });
-  el("key-label").textContent = info.label;
-  el("key-link").href = info.link;
+
+  // An agent CLI has no key: swap the key field for its install/login status.
+  el("key-field").hidden = agent;
+  el("agent-field").hidden = !agent;
+  el("test-key-btn").textContent = agent ? "Test CLI" : "Test key";
+  el("model-hint").innerHTML = agent
+    ? `Editable &mdash; leave blank to use whatever model the <code>${info.exe}</code> CLI is set to. Use <strong>Test CLI</strong> to confirm.`
+    : "Editable &mdash; providers rename models often. Use <strong>Test key</strong> to confirm the name works.";
+  if (agent) {
+    const detail = agentInfo(settingsProvider);
+    el("agent-exe").textContent = info.exe;
+    const status = el("agent-status");
+    const ok = detail.available !== false;
+    status.textContent = ok
+      ? `✓ \`${info.exe}\` found on this machine.`
+      : (detail.reason || `\`${info.exe}\` was not found on PATH.`);
+    status.className = "key-status " + (ok ? "ok" : "err");
+    const note = el("test-note");
+    note.textContent = "Runs the CLI once — a few seconds.";
+    note.hidden = false;
+  } else {
+    el("key-label").textContent = info.label;
+    el("key-link").href = info.link;
+    el("api-key").value = "";
+    el("api-key").type = "password";
+    el("api-key").placeholder = hasKeyFor(settingsProvider)
+      ? "•••••••••• (saved — leave blank to keep)"
+      : "Paste your API key";
+    el("test-note").hidden = true;
+  }
+
   el("model-options").innerHTML = info.models
     .map((m) => `<option value="${m}"></option>`).join("");
-  el("model-input").value =
-    draftModel[settingsProvider] ??
-    (settingsProvider === "grok"
-      ? state.settings.grok_model || "grok-4-fast"
-      : state.settings.gemini_model || "gemini-2.0-flash");
-  el("api-key").value = "";
-  el("api-key").type = "password";
-  el("api-key").placeholder = hasKeyFor(settingsProvider)
-    ? "•••••••••• (saved — leave blank to keep)"
-    : "Paste your API key";
+  el("model-input").value = draftModel[settingsProvider] ?? savedModelFor(settingsProvider);
   el("key-status").textContent = "";
   el("key-status").className = "key-status";
 }
@@ -477,13 +568,13 @@ function renderProviderTab() {
 function openSettings(provider) {
   settingsProvider = provider && PROVIDER_INFO[provider]
     ? provider
-    : (state.mode === "grok" ? "grok" : "gemini");
+    : (PROVIDER_INFO[state.mode] ? state.mode : "gemini");
   Object.keys(draftModel).forEach((k) => delete draftModel[k]);
   el("engine-select").value = state.settings.local_engine || "easyocr";
   renderProviderTab();
   modal.hidden = false;
 }
-["gemini", "grok"].forEach((key) => {
+PROVIDER_TABS.forEach((key) => {
   el(`tab-${key}`).addEventListener("click", () => {
     draftModel[settingsProvider] = el("model-input").value;
     settingsProvider = key;
@@ -503,7 +594,9 @@ el("key-reveal").addEventListener("click", () => {
 
 el("test-key-btn").addEventListener("click", async () => {
   const status = el("key-status");
-  status.className = "key-status"; status.textContent = "Testing…";
+  status.className = "key-status";
+  status.textContent = PROVIDER_INFO[settingsProvider].agent
+    ? "Running the CLI…" : "Testing…";
   try {
     const data = await apiJSON("/api/settings/test", {
       provider: settingsProvider,
@@ -521,15 +614,19 @@ el("settings-save").addEventListener("click", async () => {
   // Save the visible tab plus any model edited on the other one.
   draftModel[settingsProvider] = el("model-input").value;
   const payload = { local_engine: el("engine-select").value };
-  const key = el("api-key").value.trim();
-  if (settingsProvider === "grok") payload.grok_api_key = key;
-  else payload.gemini_api_key = key;
-  if (draftModel.gemini !== undefined) payload.gemini_model = draftModel.gemini.trim();
-  if (draftModel.grok !== undefined) payload.grok_model = draftModel.grok.trim();
+  // Only the cloud tabs have a key box; an agent tab leaves it hidden and empty.
+  const key = PROVIDER_INFO[settingsProvider].agent ? "" : el("api-key").value.trim();
+  if (key) {
+    if (settingsProvider === "grok") payload.grok_api_key = key;
+    else payload.gemini_api_key = key;
+  }
+  PROVIDER_TABS.forEach((p) => {
+    if (draftModel[p] !== undefined) payload[`${p}_model`] = draftModel[p].trim();
+  });
 
   try {
     state.settings = await apiJSON("/api/settings", payload);
-    updateRecognizeAvailability();
+    refreshModeButtons();  // availability can change with a new engine/model
     closeSettings();
     toast("success", "Settings saved", key ? `${PROVIDER_INFO[settingsProvider].label} key stored.` : "Settings updated.");
   } catch (err) {
@@ -547,7 +644,10 @@ async function init() {
   const mode = state.settings.mode || "local";
   setMode(mode);
   renderGrid();
-  if (isCloud(mode) && !hasKeyFor(mode)) {
+  const blocked = modeBlockedReason(mode);
+  if (isAgent(mode) && blocked) {
+    toast("warn", `${MODE_LABEL[mode]} not available`, blocked);
+  } else if (isCloud(mode) && !hasKeyFor(mode)) {
     // Only offer the offline fallback where it actually exists (it does not in
     // the standalone .exe), so the hint never sends the user somewhere broken.
     toast("warn", `Add a ${MODE_LABEL[mode]} key`,
