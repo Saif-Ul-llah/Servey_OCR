@@ -29,6 +29,12 @@
         <button id="mode-grok" class="mode-btn" role="tab" aria-selected="false">
           <span class="dot"></span> Grok
         </button>
+        <button id="mode-claudecode" class="mode-btn" role="tab" aria-selected="false">
+          <span class="dot"></span> Claude Code
+        </button>
+        <button id="mode-codex" class="mode-btn" role="tab" aria-selected="false">
+          <span class="dot"></span> Codex
+        </button>
         <button id="mode-manual" class="mode-btn" role="tab" aria-selected="false">
           Local OCR
         </button>
@@ -144,9 +150,20 @@
         <div class="provider-tabs" role="tablist">
           <button id="tab-gemini" class="provider-tab is-active" role="tab" aria-selected="true">Gemini</button>
           <button id="tab-grok" class="provider-tab" role="tab" aria-selected="false">Grok (xAI)</button>
+          <button id="tab-claudecode" class="provider-tab" role="tab" aria-selected="false">Claude Code</button>
+          <button id="tab-codex" class="provider-tab" role="tab" aria-selected="false">Codex</button>
         </div>
 
-        <div class="field">
+        <div id="agent-field" class="field" hidden>
+          <label>Command-line agent</label>
+          <p id="agent-status" class="key-status"></p>
+          <p class="hint">No API key needed &mdash; this mode runs the
+            <code id="agent-exe">claude</code> command already installed on this machine and
+            uses whatever account it is signed in to. Nothing is stored here.
+            Recognition is billed to that account per page.</p>
+        </div>
+
+        <div id="key-field" class="field">
           <label for="api-key"><span id="key-label">Gemini</span> API key</label>
           <div class="key-row">
             <input id="api-key" type="password" placeholder="Paste your API key" autocomplete="off" spellcheck="false" />
@@ -163,7 +180,7 @@
           <label for="model-input">Model</label>
           <input id="model-input" list="model-options" spellcheck="false" autocomplete="off" />
           <datalist id="model-options"></datalist>
-          <p class="hint">Editable &mdash; providers rename models often. Use <strong>Test key</strong> to confirm the name works.</p>
+          <p id="model-hint" class="hint">Editable &mdash; providers rename models often. Use <strong>Test key</strong> to confirm the name works.</p>
         </div>
 
         <div class="field">
@@ -181,6 +198,7 @@
       </div>
       <div class="modal-foot">
         <button id="test-key-btn" class="btn btn-secondary">Test key</button>
+        <span id="test-note" class="hint" hidden></span>
         <div class="grow"></div>
         <button id="settings-cancel" class="btn btn-ghost">Close</button>
         <button id="settings-save" class="btn btn-primary">Save</button>

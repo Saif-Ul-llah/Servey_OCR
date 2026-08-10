@@ -86,8 +86,13 @@ def _encode_image(path: Path) -> tuple[str, str]:
     return mime, base64.b64encode(path.read_bytes()).decode("ascii")
 
 
-def _rows_from_text(text: str) -> list[RawRow]:
-    """Parse the model's reply into rows, tolerating fences and stray prose."""
+def rows_from_text(text: str) -> list[RawRow]:
+    """Parse a model's reply into rows, tolerating fences and stray prose.
+
+    Public because every recognizer that asks a model for JSON shares this one
+    contract -- the cloud providers here and the agent CLIs in ``agent_cli`` --
+    and a second parser would be a second set of bugs.
+    """
     text = (text or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?|\n?```$", "", text).strip()
@@ -231,7 +236,7 @@ def recognise_page(
         return RecognitionResult(page=page, error=_http_error(resp, label))
 
     try:
-        rows = _rows_from_text(extract(resp.json()))
+        rows = rows_from_text(extract(resp.json()))
     except (CloudError, ValueError) as exc:
         return RecognitionResult(page=page, error=str(exc))
 

@@ -41,8 +41,19 @@ DEFAULT_GROK_MODEL = "grok-4-fast"
 #: its confidence tracks correctness closely enough to drive review flagging.
 DEFAULT_LOCAL_ENGINE = "easyocr"
 
-#: "gemini"/"grok" -> cloud recognition; "local" -> offline OCR engine + rules.
-VALID_MODES = ("gemini", "grok", "local")
+#: Model names passed to an agent CLI's ``--model`` flag. Free text like the
+#: cloud providers' -- these churn just as fast, and each CLI also accepts its
+#: own aliases ("opus", "sonnet"). Blank means "whatever the CLI is configured
+#: with", which is the right default for a tool the user already set up.
+DEFAULT_CLAUDECODE_MODEL = "claude-opus-5"
+DEFAULT_CODEX_MODEL = ""
+
+#: "gemini"/"grok" -> cloud recognition; "local" -> offline OCR engine + rules;
+#: "claudecode"/"codex" -> drive an agent CLI installed on this machine, which
+#: carries its own login instead of an API key stored here.
+VALID_MODES = ("gemini", "grok", "local", "claudecode", "codex")
+#: Modes served by ``app.agent_cli`` rather than ``app.recognizer``.
+AGENT_MODES = ("claudecode", "codex")
 #: Local OCR by default -- no key, no network -- but only where the imaging
 #: stack is actually present. The lean .exe ships without it and must not open
 #: in a mode it cannot run, while the offline .exe bundles it and should. Probe
@@ -57,6 +68,8 @@ class AppSettings:
     grok_api_key: str = ""
     grok_model: str = DEFAULT_GROK_MODEL
     local_engine: str = DEFAULT_LOCAL_ENGINE
+    claudecode_model: str = DEFAULT_CLAUDECODE_MODEL
+    codex_model: str = DEFAULT_CODEX_MODEL
     #: Local OCR is the default: it works out of the box with no API key, and
     #: needs no network. The cloud modes are more accurate but must be enabled
     #: by pasting a key into Settings.
@@ -74,7 +87,13 @@ class AppSettings:
         return self.grok_api_key if provider == "grok" else self.gemini_api_key
 
     def model_for(self, provider: str) -> str:
-        return self.grok_model if provider == "grok" else self.gemini_model
+        if provider == "grok":
+            return self.grok_model
+        if provider == "claudecode":
+            return self.claudecode_model
+        if provider == "codex":
+            return self.codex_model
+        return self.gemini_model
 
     def public(self) -> dict:
         """Safe-to-serialise view: never leak the keys themselves to the frontend."""
@@ -82,6 +101,8 @@ class AppSettings:
             "gemini_model": self.gemini_model,
             "grok_model": self.grok_model,
             "local_engine": self.local_engine,
+            "claudecode_model": self.claudecode_model,
+            "codex_model": self.codex_model,
             "mode": self.mode,
             "has_key": self.has_key,
             "has_gemini_key": self.has_key_for("gemini"),
@@ -110,6 +131,10 @@ def load() -> AppSettings:
         grok_api_key=str(data.get("grok_api_key", "") or ""),
         grok_model=str(data.get("grok_model") or DEFAULT_GROK_MODEL),
         local_engine=str(data.get("local_engine") or DEFAULT_LOCAL_ENGINE),
+        claudecode_model=str(data.get("claudecode_model") or DEFAULT_CLAUDECODE_MODEL),
+        # Blank is a meaningful value here ("use the CLI's own default"), so an
+        # absent key falls back to the default but a saved "" is kept.
+        codex_model=str(data.get("codex_model", DEFAULT_CODEX_MODEL) or ""),
         mode=str(data.get("mode") or DEFAULT_MODE),
     )
     # The environment fills a blank key only, so a key typed into the UI is
@@ -143,6 +168,8 @@ def update(
     grok_api_key: str | None = None,
     grok_model: str | None = None,
     local_engine: str | None = None,
+    claudecode_model: str | None = None,
+    codex_model: str | None = None,
     mode: str | None = None,
 ) -> AppSettings:
     """Apply a partial change and persist. Blank/omitted fields are left as-is.
@@ -162,6 +189,14 @@ def update(
         settings.grok_model = grok_model.strip()
     if local_engine is not None and local_engine.strip():
         settings.local_engine = local_engine.strip()
+    # Agent models are the one field where blank is a real value, not "no
+    # change": it means "let the CLI pick", so an emptied box must be able to
+    # get back there. Safe to honour here because these are not secrets -- the
+    # blank-means-no-change rule above exists to stop a saved key being wiped.
+    if claudecode_model is not None:
+        settings.claudecode_model = claudecode_model.strip()
+    if codex_model is not None:
+        settings.codex_model = codex_model.strip()
     if mode is not None and mode in VALID_MODES:
         settings.mode = mode
     save(settings)

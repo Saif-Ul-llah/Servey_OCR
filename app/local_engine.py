@@ -23,6 +23,8 @@ from pathlib import Path
 import importlib.util
 import sys
 
+import numpy as np
+
 from local_ocr.ocr.base import Engine, Field
 from local_ocr.ocr.engines import REGISTRY, build
 

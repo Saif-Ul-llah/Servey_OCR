@@ -28,4 +28,5 @@ debug_overlays/
 Thumbs.db
 .DS_Store
 .idea/
-.vscode/
+config.bat
+node_modules

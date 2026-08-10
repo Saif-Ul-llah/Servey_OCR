@@ -34,21 +34,27 @@ Two layers, kept strictly separate:
    - `export/xlsx_exporter.py` — `write_workbook()`; reproduces exact cell types.
 
 2. **`app/` — the desktop app.** A thin FastAPI layer that *drives* the core.
-   Two recognition modes, same downstream flow
+   Three recognition *transports*, five user-facing modes, same downstream flow
    (`upload → recognise → correct → review → export`):
    - `recognizer.py` — **cloud** vision via REST → raw rows. Gemini and Grok
      share the prompt, JSON parsing and error handling; each provider is only a
      request builder + response extractor in the `_PROVIDERS` table. Add a
-     provider there, not by copying the module.
+     provider there, not by copying the module. `PROMPT` and `rows_from_text`
+     are the shared contract every other transport imports.
+   - `agent_cli.py` — **agent CLI** (Claude Code, Codex): shells out to a CLI
+     already installed and signed in on the machine, which reads the page with
+     its own file tool. No API key. Same `_AGENTS` request-builder/extractor
+     table shape as `recognizer.py`.
    - `local_engine.py` — **Local OCR** (offline): `local_ocr.layout.ruled`
-     segments the page, `local_ocr.ocr` engine (TrOCR-base) reads each cell.
+     segments the page, `local_ocr.ocr` engine (EasyOCR) reads each cell.
      Decoding is grammar-constrained (`local_ocr/ocr/constrained.py`).
    - `pipeline.py` — `process()` (correct + assemble → review grid + audit; also
      flags low-confidence cells) and `export()` (grid → workbook, verbatim). The
      **only** place the app reaches into `local_ocr`.
-   - `server.py` — JSON API (`/api/recognize`, `/api/recognize_local`,
-     `/api/validate`, `/api/export`) + serves `static/` (vanilla-JS SPA).
-   - `settings_store.py` — persists the Gemini key/model, local engine, and mode.
+   - `server.py` — JSON API (`/api/recognize`, `/api/recognize_agent`,
+     `/api/recognize_local`, `/api/validate`, `/api/export`) + serves `static/`
+     (vanilla-JS SPA).
+   - `settings_store.py` — persists keys, per-provider models, local engine, mode.
 
 **Rule: the app never re-implements core logic.** New correction or assembly
 behaviour goes in `local_ocr/` with tests, not in `app/`.
@@ -61,6 +67,29 @@ alongside a run of that script, and **look at the crops** (render them; blank or
 half-cut crops are invisible in an accuracy number and were the actual bug that
 made local OCR unusable). Constants there were fitted at 960x1280 and need a
 re-check on full-resolution originals.
+
+## Driving an agent CLI: pin it down, and never trust the shape of its output
+
+`app/agent_cli.py` runs someone else's interactive tool non-interactively, so it
+constrains it hard, and every constraint is load-bearing:
+
+- **Only the file-reading tool, and pre-approved.** A non-interactive run cannot
+  answer a permission prompt, so it must never be asked one.
+- **Customisations off (`--safe-mode`), sessions off.** A stray `CLAUDE.md` from
+  whatever project the folder sits under otherwise rides along in the prompt —
+  costing ~6× per page and steering the transcription. A 12-page batch also
+  should not leave 12 resumable sessions behind.
+- **Prompt on stdin, never argv.** Windows caps a command line at ~8 KB.
+- **`.cmd`/`.bat` shims need `cmd.exe /c`.** `CreateProcess` cannot run them, and
+  npm-installed CLIs land as shims on Windows.
+- **Parse forgivingly.** These are CLIs, not versioned APIs: event names and
+  envelope shapes change. Scan for the text and fall back to raw stdout rather
+  than matching one documented field. Codex's parser is written this way because
+  it could not be run at all here — keep it that way until someone verifies it
+  against a real install.
+
+Availability is "is the command on PATH", answered before the user uploads
+anything, exactly as `local_engine.availability` does it.
 
 ## The default recognizer is cloud — do not propose a local VLM
 
@@ -86,13 +115,13 @@ another VLM. See `MEMORY.md`.
 ```bash
 python -m pip install -r requirements.txt
 python run_app.py                                  # dev server, opens browser
-python -m pytest tests                             # 154 tests — keep them green
+python -m pytest tests                             # 184 tests — keep them green
 python -m PyInstaller ServeyOCR.spec --noconfirm   # -> dist/ServeyOCR.exe
 ```
 
 ## Before you commit
 
-- `python -m pytest tests` passes (all 154).
+- `python -m pytest tests` passes (all 184; 154 of them cover `local_ocr/`).
 - No secrets committed. `app_settings.json` holds the Gemini API key and is
   git-ignored — **never** add it, and never paste a key into code or docs.
 - `output/`, `dist/`, `build/`, `__pycache__/` stay out of git (see `.gitignore`).
